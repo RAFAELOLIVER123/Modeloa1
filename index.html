@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Leitor de RG e CNH com Exportação para Excel</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+        <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.5.136/build/pdf.min.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <h1>Leitor de Documento (RG e CNH)</h1>
+        <p>
+          Faça upload de imagens ou PDFs para extrair automaticamente nome e datas, organizar os
+          dados em tabela e exportar para Excel.
+        </p>
+      </header>
+
+      <section class="panel upload-panel">
+        <label class="upload-label" for="fileInput">Selecionar documentos</label>
+        <input id="fileInput" type="file" accept="image/*,.pdf" multiple />
+        <small>
+          Dica: fotos com boa iluminação e texto visível melhoram a precisão do OCR.
+        </small>
+        <div class="actions">
+          <button id="processBtn" type="button">Analisar documentos</button>
+          <button id="clearBtn" type="button" class="secondary">Limpar tabela</button>
+          <button id="exportBtn" type="button" class="success">Salvar em Excel</button>
+        </div>
+      </section>
+
+      <section class="panel status-panel" aria-live="polite">
+        <h2>Status</h2>
+        <p id="statusText">Aguardando seleção de arquivos.</p>
+        <div class="progress-track" aria-hidden="true">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+      </section>
+
+      <section class="panel table-panel">
+        <h2>Dados extraídos</h2>
+        <div class="table-wrap">
+          <table id="resultsTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Arquivo</th>
+                <th>Tipo</th>
+                <th>Nome</th>
+                <th>Data de nascimento</th>
+                <th>Data de emissão</th>
+                <th>Validade</th>
+                <th>1ª habilitação</th>
+                <th>Número do documento</th>
+                <th>Confiança OCR (%)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
