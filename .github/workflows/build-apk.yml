@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build AgroDominium APK
 
 on:
   push:
@@ -38,11 +38,11 @@ jobs:
         run: gradle --no-daemon assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk Gestao-Operacional-PAF.apk
+        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v1.1.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Gestao-Operacional-PAF-APK
-          path: Gestao-Operacional-PAF.apk
+          name: AgroDominium-APK
+          path: AgroDominium-v1.1.0.apk
           if-no-files-found: error
