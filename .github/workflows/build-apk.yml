@@ -38,11 +38,11 @@ jobs:
         run: gradle --no-daemon assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v2.1.0.apk
+        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v2.2.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AgroDominium-v2.1.0-APK
-          path: AgroDominium-v2.1.0.apk
+          name: AgroDominium-v2.2.0-APK
+          path: AgroDominium-v2.2.0.apk
           if-no-files-found: error
