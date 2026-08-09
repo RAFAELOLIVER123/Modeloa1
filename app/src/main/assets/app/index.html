@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#0b5d3f">
+  <title>AgroDominium</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brandmark"><span class="leaf-dot"></span></div>
+      <div class="brandtext"><strong>AgroDominium</strong><small id="subtitle">Campo offline</small></div>
+      <div class="top-actions">
+        <button id="netChip" class="chip offline" type="button" onclick="showSync()">Offline</button>
+        <button class="icon-btn" type="button" onclick="showSync()" aria-label="Sincronizar">↻</button>
+      </div>
+    </header>
+
+    <main id="screen" class="screen"></main>
+
+    <nav id="bottomNav" class="bottom-nav">
+      <button data-tab="home" onclick="nav('home')"><span>⌂</span><b>Campo</b></button>
+      <button data-tab="agenda" onclick="nav('agenda')"><span>▣</span><b>Agenda</b></button>
+      <button class="add-main" data-tab="add" onclick="nav('add')"><span>＋</span><b>Adicionar</b></button>
+      <button data-tab="map" onclick="nav('map')"><span>⌖</span><b>Mapa</b></button>
+      <button data-tab="profile" onclick="nav('profile')"><span>♙</span><b>Perfil</b></button>
+    </nav>
+  </div>
+
+  <div id="loginOverlay" class="login-overlay hidden">
+    <div class="login-card">
+      <div class="login-logo"><span class="sprout">⌖</span></div>
+      <h1>AgroDominium</h1>
+      <p>Conecte uma vez para baixar seus dados. Depois o trabalho de campo continua sem internet.</p>
+      <label>Usuário, e-mail ou matrícula<input id="loginUser" autocomplete="username" placeholder="Seu acesso"></label>
+      <label>Senha<input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></label>
+      <button id="loginBtn" class="btn primary full" onclick="doLogin()">Conectar e baixar dados</button>
+      <small>Após a primeira sincronização, os dados ficam salvos neste aparelho.</small>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
