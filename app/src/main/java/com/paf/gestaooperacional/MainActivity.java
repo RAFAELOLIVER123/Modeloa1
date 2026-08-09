@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
         root.addView(webView,new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,FrameLayout.LayoutParams.MATCH_PARENT));FrameLayout.LayoutParams pp=new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,6);root.addView(progressBar,pp);setContentView(root);
         ViewCompat.setOnApplyWindowInsetsListener(root,(v,insets)->{Insets bars=insets.getInsets(WindowInsetsCompat.Type.systemBars()|WindowInsetsCompat.Type.displayCutout());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});ViewCompat.requestApplyInsets(root);
         WindowInsetsControllerCompat ctl=new WindowInsetsControllerCompat(getWindow(),root);ctl.setAppearanceLightStatusBars(true);ctl.setAppearanceLightNavigationBars(true);
-        configureWebView();requestBasePermissions();webView.loadUrl(LOCAL_URL);SyncScheduler.schedule(this);
+        configureWebView();requestBasePermissions();webView.loadUrl(LOCAL_URL);
         String active=OfflineDb.get(this).getActiveRouteUuid();if(active!=null&&hasLocationPermission()){Intent i=new Intent(this,LocationTrackingService.class);i.setAction(LocationTrackingService.ACTION_START);i.putExtra("route_uuid",active);ContextCompat.startForegroundService(this,i);}
     }
 
