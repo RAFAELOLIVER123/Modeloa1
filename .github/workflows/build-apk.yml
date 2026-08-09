@@ -1,4 +1,4 @@
-name: Build AgroDominium APK
+name: Build AgroDominium Offline APK
 
 on:
   push:
@@ -38,11 +38,11 @@ jobs:
         run: gradle --no-daemon assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v1.1.0.apk
+        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v2.0.0-OFFLINE.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AgroDominium-APK
-          path: AgroDominium-v1.1.0.apk
+          name: AgroDominium-Offline-APK
+          path: AgroDominium-v2.0.0-OFFLINE.apk
           if-no-files-found: error
