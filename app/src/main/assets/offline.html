@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+  <title>AgroDominium • Offline</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f8f6;color:#173f32}body{display:flex;align-items:center;justify-content:center;padding:24px}.card{width:min(100%,520px);background:#fff;border:1px solid #dbe7e1;border-radius:28px;padding:28px;box-shadow:0 16px 50px rgba(18,63,49,.10)}.brand{display:flex;align-items:center;gap:14px;margin-bottom:22px}.logo{width:58px;height:58px;border-radius:18px;background:#0d7a52;display:grid;place-items:center;color:#fff;font-size:30px;font-weight:800}.brand h1{font-size:26px;margin:0}.brand p{margin:3px 0 0;color:#74877f}.badge{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border-radius:999px;background:#fff3d8;color:#76520b;font-weight:700;font-size:13px;margin-bottom:18px}.dot{width:9px;height:9px;border-radius:50%;background:#e6a727}.msg{font-size:18px;line-height:1.5;margin:0 0 16px}.sub{color:#6d8078;line-height:1.55;margin:0 0 24px}.queue{border-radius:18px;background:#eef8f3;padding:16px;margin-bottom:20px}.queue strong{display:block;font-size:28px;color:#0d7a52}.queue span{color:#6d8078}.btn{width:100%;border:0;border-radius:16px;padding:16px 18px;background:#0d7a52;color:#fff;font-size:17px;font-weight:800}.hint{font-size:12px;color:#819189;text-align:center;margin-top:14px;line-height:1.45}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <div class="logo">A</div>
+      <div><h1>AgroDominium</h1><p>Campo • modo offline</p></div>
+    </div>
+    <div class="badge"><span class="dot"></span> Sem conexão com a internet</div>
+    <p class="msg">Se a tela de coleta já foi aberta anteriormente, ela continua disponível pelo cache do aplicativo e os envios ficam salvos no aparelho.</p>
+    <p class="sub">Quando a conexão voltar, o AgroDominium tenta sincronizar automaticamente as coletas pendentes usando a sua sessão atual.</p>
+    <div class="queue"><strong id="count">0</strong><span>coleta(s) aguardando sincronização</span></div>
+    <button class="btn" onclick="retry()">Tentar reconectar</button>
+    <div class="hint">GPS, fotos e formulários podem ser armazenados localmente quando capturados em telas já carregadas no aplicativo.</div>
+  </main>
+<script>
+  function update(){try{document.getElementById('count').textContent=String(AgroDominiumOffline.count()||0)}catch(e){}}
+  function retry(){try{AgroDominiumOffline.openOnline()}catch(e){location.reload()}}
+  update();setInterval(update,1500);
+</script>
+</body>
+</html>
