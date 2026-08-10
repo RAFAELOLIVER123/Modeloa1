@@ -6,6 +6,12 @@
   <meta name="theme-color" content="#ffffff">
   <title>AgroDominium</title>
   <link rel="stylesheet" href="style-v23.css">
+  <style>
+    .login-card{padding-top:42px!important;padding-bottom:30px!important}
+    .login-logo{margin:0 auto 34px!important}
+    .login-card label{margin-top:18px!important}
+    .login-card>small{display:block;text-align:center;margin-top:18px;line-height:1.45}
+  </style>
 </head>
 <body>
 <div id="app" class="app-shell">
@@ -27,17 +33,17 @@
 </div>
 <div id="loginOverlay" class="login-overlay hidden">
   <div class="login-card">
-    <div class="login-logo"><svg viewBox="0 0 128 128"><path d="M62 96c0-20 2-35 5-46" fill="none" stroke="#0e6b45" stroke-width="8" stroke-linecap="round"/><path d="M66 54c-18 0-30-11-31-29 18-2 33 7 36 24-1 2-3 4-5 5Z" fill="#79a63b"/><path d="M70 68c3-20 17-31 37-28-1 20-13 33-33 34-2-2-3-4-4-6Z" fill="#0e6b45"/><path d="M64 97h24" fill="none" stroke="#0e6b45" stroke-width="8" stroke-linecap="round"/></svg></div>
-    <h1>AgroDominium</h1>
-    <p>Entre com internet para validar este aparelho e baixar sua base de trabalho. Depois, o uso de campo continua offline.</p>
+    <div class="login-logo">
+      <svg viewBox="0 0 128 128"><path d="M62 96c0-20 2-35 5-46" fill="none" stroke="#0e6b45" stroke-width="8" stroke-linecap="round"/><path d="M66 54c-18 0-30-11-31-29 18-2 33 7 36 24-1 2-3 4-5 5Z" fill="#79a63b"/><path d="M70 68c3-20 17-31 37-28-1 20-13 33-33 34-2-2-3-4-4-6Z" fill="#0e6b45"/><path d="M64 97h24" fill="none" stroke="#0e6b45" stroke-width="8" stroke-linecap="round"/></svg>
+    </div>
     <label>Usuário, e-mail ou matrícula<input id="loginUser" autocomplete="username" placeholder="Seu acesso"></label>
     <label>Senha<input id="loginPass" type="password" autocomplete="current-password" placeholder="••••••••"></label>
-    <button id="loginBtn" class="btn primary full" onclick="doLogin()">Entrar e baixar dados</button>
+    <button id="loginBtn" type="button" class="btn primary full" onclick="doLogin()">Entrar</button>
     <small>Os dados já salvos no aparelho não são apagados durante a atualização.</small>
   </div>
 </div>
 <div id="toast" class="toast"></div>
-<script src="app-v23.js"></script>
-<script src="fix-v222.js"></script>
+<script src="app-v23.js?v=223"></script>
+<script src="fix-v223.js?v=223"></script>
 </body>
 </html>
