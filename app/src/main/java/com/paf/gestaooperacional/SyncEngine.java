@@ -25,14 +25,14 @@ public class SyncEngine {
         JSONObject api=null,compat=null;
         Exception apiError=null,compatError=null;
         try{api=ApiClient.bootstrap(token,gid);}catch(Exception e){apiError=e;}
-        if(CompatClient.hasSession(ctx)){
-            try{compat=CompatClient.bootstrap(ctx,gid);}catch(Exception e){compatError=e;}
+        if(CompatBootstrapClient.hasSession(ctx)){
+            try{compat=CompatBootstrapClient.bootstrap(ctx,gid);}catch(Exception e){compatError=e;}
         }
 
         JSONObject j=mergeSnapshots(api,compat,gid);
         if(!hasUsefulData(j)){
             String a=apiError==null?"API sem dados":safe(apiError.getMessage());
-            String c=compatError==null?(CompatClient.hasSession(ctx)?"sessão web sem dados":"sessão web não disponível"):safe(compatError.getMessage());
+            String c=compatError==null?(CompatBootstrapClient.hasSession(ctx)?"sessão web sem dados":"sessão web não disponível"):safe(compatError.getMessage());
             throw new IllegalStateException("Não foi possível montar a base do aplicativo. "+a+" · "+c);
         }
 
@@ -67,7 +67,7 @@ public class SyncEngine {
         JSONObject out=new JSONObject();
         try{
             JSONObject d=j==null?null:j.optJSONObject("data");if(d==null)return out;
-            String[] keys={"produtores","plantios","comunidades","atividades","polos","veiculos","programacoes","pontos","equipe","sessoes","localizacoes","checklist_veiculo_itens","aprovacoes_programacoes","checklists_pendentes"};
+            String[] keys={"produtores","plantios","comunidades","atividades","polos","veiculos","programacoes","pontos","equipe","sessoes","localizacoes","checklist_veiculo_itens","aprovacoes_programacoes","checklists_pendentes","estimativas","levantamentos","manutencoes","manutencao_solicitacoes","chat_conversas","chat_mensagens"};
             for(String k:keys){JSONArray a=d.optJSONArray(k);out.put(k,a==null?0:a.length());}
         }catch(Exception ignored){}
         return out;
@@ -89,7 +89,13 @@ public class SyncEngine {
         java.util.LinkedHashSet<String> keys=new java.util.LinkedHashSet<>();
         if(da!=null){Iterator<String> it=da.keys();while(it.hasNext())keys.add(it.next());}
         if(dc!=null){Iterator<String> it=dc.keys();while(it.hasNext())keys.add(it.next());}
-        String[] expected={"polos","comunidades","atividades","veiculos","checklist_veiculo_itens","programacoes","aprovacoes_programacoes","produtores","plantios","pontos","equipe","sessoes","localizacoes","checklists_veiculo","checklists_pendentes","movimentacoes_veiculos"};
+        String[] expected={
+                "polos","comunidades","atividades","veiculos","checklist_veiculo_itens",
+                "programacoes","aprovacoes_programacoes","produtores","plantios","pontos","equipe",
+                "sessoes","localizacoes","checklists_veiculo","checklists_pendentes","movimentacoes_veiculos",
+                "estimativas","levantamentos","manutencao_itens","manutencao_moto_itens","manutencoes",
+                "manutencao_solicitacoes","manutencao_moto_solicitacoes","chat_conversas","chat_membros","chat_mensagens"
+        };
         for(String k:expected)keys.add(k);
 
         for(String k:keys){
@@ -124,11 +130,26 @@ public class SyncEngine {
                         response=EstimateClient.sync(ctx,payload,q.optString("photos_json","[]"));
                     }else{
                         try{
-                            JSONObject op=new JSONObject();op.put("client_uuid",q.getString("client_uuid"));op.put("type",type);op.put("group_id",q.optInt("group_id",parseInt(db.getSetting("group_id","0"))));
+                            JSONObject op=new JSONObject();
+                            op.put("client_uuid",q.getString("client_uuid"));
+                            op.put("type",type);
+                            op.put("group_id",q.optInt("group_id",parseInt(db.getSetting("group_id","0"))));
                             JSONObject apiPayload=new JSONObject(payload.toString());
-                            if("vehicle_checklist.create".equals(type)){String sigPath=apiPayload.optString("assinatura_path_local","");if(!sigPath.isEmpty()){apiPayload.remove("assinatura_path_local");apiPayload.put("assinatura_tecnico",encodeOneFile(sigPath,"assinatura-tecnico"));}}
-                            op.put("payload",apiPayload);op.put("photos",encodePhotos(q.optString("photos_json","[]")));response=ApiClient.sync(token,op);
-                        }catch(Exception apiError){if(!CompatClient.hasSession(ctx))throw apiError;response=CompatClient.syncOperation(ctx,type,payload,q.optString("photos_json","[]"));}
+                            if("vehicle_checklist.create".equals(type)){
+                                String sigPath=apiPayload.optString("assinatura_path_local","");
+                                if(!sigPath.isEmpty()){
+                                    apiPayload.remove("assinatura_path_local");
+                                    apiPayload.put("assinatura_tecnico",encodeOneFile(sigPath,"assinatura-tecnico"));
+                                }
+                            }
+                            op.put("payload",apiPayload);
+                            op.put("photos",encodeFiles(q.optString("photos_json","[]")));
+                            response=ApiClient.sync(token,op);
+                        }catch(Exception apiError){
+                            // O fallback web antigo continua atendendo apenas os fluxos legados.
+                            if(!CompatClient.hasSession(ctx))throw apiError;
+                            response=CompatClient.syncOperation(ctx,type,payload,q.optString("photos_json","[]"));
+                        }
                     }
                     db.markSynced(id,response.toString());
                     if("route.sync".equals(type))db.markRouteSynced(payload.optString("route_uuid",q.getString("client_uuid")));
@@ -165,12 +186,63 @@ public class SyncEngine {
         return out;
     }
 
-    private static JSONObject encodeOneFile(String path,String displayName) throws Exception{File f=new File(path);if(!f.isFile())throw new IllegalStateException("A assinatura salva no aparelho não foi encontrada.");byte[] b=readFile(f);JSONObject p=new JSONObject();p.put("name",displayName+extension(f.getName()));p.put("mime",mime(f.getName()));p.put("data",Base64.encodeToString(b,Base64.NO_WRAP));return p;}
-    private static JSONArray encodePhotos(String json) throws Exception{JSONArray src;try{src=new JSONArray(json);}catch(Exception e){src=new JSONArray();}JSONArray out=new JSONArray();for(int i=0;i<src.length();i++){String path;JSONObject original=src.opt(i) instanceof JSONObject?src.optJSONObject(i):null;if(original!=null)path=original.optString("path","");else path=src.optString(i,"");if(path.isEmpty())continue;File f=new File(path);if(!f.isFile())throw new IllegalStateException("Uma foto salva no aparelho não foi encontrada: "+new File(path).getName());byte[] b=readFile(f);JSONObject p=new JSONObject();p.put("name",f.getName());p.put("mime",mime(f.getName()));p.put("data",Base64.encodeToString(b,Base64.NO_WRAP));if(original!=null&&original.has("categoria"))p.put("categoria",original.optString("categoria"));out.put(p);}return out;}
-    private static byte[] readFile(File f) throws Exception{long len=f.length();if(len>12L*1024*1024)throw new IllegalStateException("O arquivo "+f.getName()+" ultrapassa 12 MB.");byte[] b=new byte[(int)len];try(FileInputStream in=new FileInputStream(f)){int off=0,n;while(off<b.length&&(n=in.read(b,off,b.length-off))>0)off+=n;if(off!=b.length)throw new IllegalStateException("Não foi possível ler um arquivo salvo no aparelho.");}return b;}
+    private static JSONObject encodeOneFile(String path,String displayName) throws Exception{
+        File f=new File(path);if(!f.isFile())throw new IllegalStateException("O arquivo salvo no aparelho não foi encontrado.");
+        byte[] b=readFile(f);JSONObject p=new JSONObject();p.put("name",displayName+extension(f.getName()));p.put("mime",mime(f.getName()));p.put("data",Base64.encodeToString(b,Base64.NO_WRAP));return p;
+    }
+
+    private static JSONArray encodeFiles(String json) throws Exception{
+        JSONArray src;try{src=new JSONArray(json);}catch(Exception e){src=new JSONArray();}
+        JSONArray out=new JSONArray();
+        for(int i=0;i<src.length();i++){
+            String path;JSONObject original=src.opt(i) instanceof JSONObject?src.optJSONObject(i):null;
+            if(original!=null)path=original.optString("path","");else path=src.optString(i,"");
+            if(path.isEmpty())continue;
+            File f=new File(path);if(!f.isFile())throw new IllegalStateException("Um arquivo salvo no aparelho não foi encontrado: "+new File(path).getName());
+            byte[] b=readFile(f);JSONObject p=new JSONObject();p.put("name",f.getName());p.put("mime",mime(f.getName()));p.put("data",Base64.encodeToString(b,Base64.NO_WRAP));
+            if(original!=null){
+                if(original.has("categoria"))p.put("categoria",original.optString("categoria"));
+                if(original.has("duracao_segundos"))p.put("duracao_segundos",original.optDouble("duracao_segundos"));
+                if(original.has("tipo"))p.put("tipo",original.optString("tipo"));
+            }
+            out.put(p);
+        }
+        return out;
+    }
+
+    private static byte[] readFile(File f) throws Exception{
+        long len=f.length();if(len>25L*1024*1024)throw new IllegalStateException("O arquivo "+f.getName()+" ultrapassa 25 MB.");
+        byte[] b=new byte[(int)len];try(FileInputStream in=new FileInputStream(f)){int off=0,n;while(off<b.length&&(n=in.read(b,off,b.length-off))>0)off+=n;if(off!=b.length)throw new IllegalStateException("Não foi possível ler um arquivo salvo no aparelho.");}return b;
+    }
     private static String extension(String n){int i=n.lastIndexOf('.');return i>=0?n.substring(i):".jpg";}
-    private static String mime(String n){String x=n.toLowerCase(Locale.ROOT);if(x.endsWith(".png"))return "image/png";if(x.endsWith(".webp"))return "image/webp";if(x.endsWith(".heic"))return "image/heic";return "image/jpeg";}
-    private static String pretty(String type){if("programacao.create".equals(type))return "programação";if("programacao.approval".equals(type))return "aprovação da programação";if("ponto.create".equals(type))return "ponto de campo";if("route.sync".equals(type))return "rota GPS";if("vehicle_checklist.create".equals(type))return "checklist do veículo";if("vehicle_checklist.approval".equals(type))return "aprovação do checklist";if("vehicle_checklist.odometer_final".equals(type))return "odômetro final";if("estimativa.save".equals(type))return "estimativa de produção";return "registro de campo";}
+    private static String mime(String n){
+        String x=n.toLowerCase(Locale.ROOT);
+        if(x.endsWith(".png"))return "image/png";
+        if(x.endsWith(".webp"))return "image/webp";
+        if(x.endsWith(".heic"))return "image/heic";
+        if(x.endsWith(".pdf"))return "application/pdf";
+        if(x.endsWith(".m4a")||x.endsWith(".mp4"))return "audio/mp4";
+        if(x.endsWith(".aac"))return "audio/aac";
+        if(x.endsWith(".mp3"))return "audio/mpeg";
+        if(x.endsWith(".wav"))return "audio/wav";
+        if(x.endsWith(".ogg"))return "audio/ogg";
+        return "image/jpeg";
+    }
+    private static String pretty(String type){
+        if("programacao.create".equals(type))return "programação";
+        if("programacao.approval".equals(type))return "aprovação da programação";
+        if("ponto.create".equals(type))return "ponto de campo";
+        if("route.sync".equals(type))return "rota GPS";
+        if("vehicle_checklist.create".equals(type))return "checklist do veículo";
+        if("vehicle_checklist.approval".equals(type))return "aprovação do checklist";
+        if("vehicle_checklist.odometer_final".equals(type))return "odômetro final";
+        if("estimativa.save".equals(type))return "estimativa de produção";
+        if("maintenance.request".equals(type))return "solicitação de manutenção";
+        if("maintenance.decision".equals(type))return "decisão da manutenção";
+        if("chat.message".equals(type))return "mensagem do chat";
+        if("chat.conversation".equals(type))return "conversa do chat";
+        return "registro de campo";
+    }
     private static int parseInt(String s){try{return Integer.parseInt(s);}catch(Exception e){return 0;}}
     private static String safe(String s){return s==null||s.trim().isEmpty()?"falha sem detalhes":s.trim();}
 }
