@@ -33,7 +33,7 @@
             android:foregroundServiceType="location" />
 
         <activity
-            android:name=".MainActivity"
+            android:name=".MainActivityV23"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
