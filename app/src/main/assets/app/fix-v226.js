@@ -1,55 +1,65 @@
 (function(){
   'use strict';
 
-  // Administrador deve receber a mesma visão gerencial completa no aplicativo.
-  try{
-    isManager=function(){
-      return ['SUPERVISOR','GERENTE','DIRETOR','ADMIN','ADMINISTRADOR','ADMINISTRATOR'].includes(String(role()||'').toUpperCase());
-    };
-  }catch(e){}
-
   function countsText(c){
     if(!c)return '';
-    const parts=[];
-    if(+c.produtores)parts.push(c.produtores+' produtores');
-    if(+c.atividades)parts.push(c.atividades+' atividades');
-    if(+c.veiculos)parts.push(c.veiculos+' veículos');
-    if(+c.comunidades)parts.push(c.comunidades+' comunidades');
-    if(+c.programacoes)parts.push(c.programacoes+' programações');
-    return parts.slice(0,4).join(' · ');
+    const p=[];
+    if(+c.produtores)p.push(c.produtores+' produtores');
+    if(+c.atividades)p.push(c.atividades+' atividades');
+    if(+c.veiculos)p.push(c.veiculos+' veículos');
+    if(+c.comunidades)p.push(c.comunidades+' comunidades');
+    if(+c.programacoes)p.push(c.programacoes+' programações');
+    return p.slice(0,5).join(' · ');
   }
 
-  // Um único botão faz as duas direções: aparelho -> servidor e servidor -> aparelho.
+  // ADMIN e ADMINISTRADOR recebem a visão completa de gestão no aplicativo.
   try{
-    syncBoth=function(){
-      load();
-      const on=!!native('isOnline');
-      updateNet(on);
-      if(!on)return toast('Sem internet. Continue trabalhando: os registros ficam salvos no aparelho.','warn');
-      const chip=document.getElementById('netChip');
-      if(chip){chip.textContent='Sincronizando';chip.className='chip syncing';}
-      toast('Enviando coletas e baixando atualizações…');
-      native('syncNow');
+    isManager=function(){
+      const r=String((S.user||{}).perfil_codigo||(S.user||{}).perfil||'').toUpperCase();
+      return ['SUPERVISOR','GERENTE','DIRETOR','ADMIN','ADMINISTRADOR','ADMINISTRATOR'].includes(r);
     };
   }catch(e){}
+
+  // Só existe uma operação de sincronização: envia o que está no celular e baixa as bases novas.
+  try{
+    refreshData=function(){syncNow();};
+    syncNow=function(){
+      load();
+      const on=!!native('isOnline');
+      net(on);S.online=on;
+      if(!on)return toast('Sem internet. Continue trabalhando: os registros ficam salvos no aparelho.','warn');
+      const c=document.getElementById('netChip');
+      if(c){c.textContent='Sincronizando';c.className='chip syncing';}
+      toast('Enviando coletas e baixando bases…');
+      native('syncNow');
+    };
+    window.syncBoth=syncNow;
+  }catch(e){}
+
+  window.agroSyncProgress=function(payload){
+    const r=parse(payload,{});if(r.message)toast(r.message);
+  };
 
   window.agroSyncResult=function(payload){
     const r=parse(payload,{});
-    load();
-    updateNet(!!native('isOnline'));
+    load();net(!!native('isOnline'));S.online=!!native('isOnline');
     const resumo=countsText(r.contagens);
     if(r.base_atualizada){
-      toast((r.message||'Sincronização concluída.')+(resumo?' '+resumo+'.':''),r.falhas>0?'warn':'');
-      setTimeout(function(){
-        load();
-        if(typeof FORM!=='undefined'&&FORM&&typeof syncScreen==='function')syncScreen();
-        else if(typeof home==='function')home();
-      },300);
+      const msg=(r.message||'Sincronização concluída.')+(resumo?' '+resumo+'.':'');
+      toast(msg,r.falhas>0?'warn':'');
+      setTimeout(function(){load();if(form)syncScreen();else home();},300);
       return;
     }
     if(r.ok)toast(r.message||'Sincronização concluída.');
-    else toast(r.error||r.erro_base||'Não foi possível atualizar as bases.','bad');
-    if(typeof FORM!=='undefined'&&FORM&&typeof syncScreen==='function')syncScreen();
+    else toast(r.error||r.erro_base||'Não foi possível baixar as bases.','bad');
+    if(form)syncScreen();
+  };
+
+  window.agroRefreshResult=window.agroSyncResult;
+
+  window.agroLoginProgress=function(payload){
+    const r=parse(payload,{}),b=document.getElementById('loginBtn');
+    if(b&&r.message){b.disabled=true;b.textContent=r.message;}
   };
 
   window.agroLoginResult=function(payload){
@@ -63,95 +73,101 @@
     nav('home');
   };
 
-  window.agroLoginProgress=function(payload){
-    const r=parse(payload,{}),b=document.getElementById('loginBtn');
-    if(b&&r.message){b.disabled=true;b.textContent=r.message;}
-  };
-
-  // ---------- mapa base ----------
-  const style=document.createElement('style');
-  style.textContent=`
-    .map-shell{position:relative;overflow:hidden;background:#e8efe9!important}
-    .map-tile-layer{position:absolute;inset:0;overflow:hidden;z-index:0;background:linear-gradient(180deg,#e8efe9,#f3f7f4)}
-    .map-tile-layer img{position:absolute;display:block;max-width:none;user-select:none;pointer-events:none}
-    .map-tile-layer .offline-map-note{position:absolute;left:12px;bottom:12px;padding:6px 9px;border-radius:10px;background:rgba(255,255,255,.88);color:#61736c;font-size:10px;font-weight:700}
-    #mapCanvas{position:relative!important;z-index:2!important;background:transparent!important}
-    .map-tools,.map-info,.map-watermark{z-index:4!important}
-    .map-watermark{background:rgba(255,255,255,.82)!important;padding:4px 7px!important;border-radius:8px!important}
-  `;
-  document.head.appendChild(style);
-
-  let tileKey='';
-  function clampLat(v){return Math.max(-85.0511,Math.min(85.0511,+v));}
-  function worldX(lon,z){return ((+lon+180)/360)*256*Math.pow(2,z);}
-  function worldY(lat,z){lat=clampLat(lat)*Math.PI/180;return (1-Math.log(Math.tan(lat)+1/Math.cos(lat))/Math.PI)/2*256*Math.pow(2,z);}
-  function chooseZoom(b,w,h){
-    const lon=Math.max(.0001,b.maxLng-b.minLng),lat=Math.max(.0001,b.maxLat-b.minLat);
-    const zx=Math.log2(Math.max(1,w/256)*360/lon);
-    const zy=Math.log2(Math.max(1,h/256)*170/lat);
-    return Math.max(5,Math.min(17,Math.floor(Math.min(zx,zy))));
-  }
-  function ensureTileLayer(){
-    const shell=document.querySelector('.map-shell');if(!shell)return null;
-    let layer=shell.querySelector('.map-tile-layer');
-    if(!layer){layer=document.createElement('div');layer.className='map-tile-layer';shell.insertBefore(layer,shell.firstChild);}
-    const wm=shell.querySelector('.map-watermark');if(wm)wm.textContent='AgroDominium · © OpenStreetMap';
-    return layer;
-  }
-  function renderBaseTiles(){
-    try{
-      const layer=ensureTileLayer(),canvas=document.getElementById('mapCanvas');
-      if(!layer||!canvas||!MAP||!MAP.bounds)return;
-      const r=canvas.getBoundingClientRect(),w=r.width,h=r.height,b=MAP.bounds;
-      if(w<10||h<10)return;
-      const z=chooseZoom(b,w,h);
-      const minX=worldX(b.minLng,z),maxX=worldX(b.maxLng,z),topY=worldY(b.maxLat,z),bottomY=worldY(b.minLat,z);
-      const sx=w/Math.max(1,maxX-minX),sy=h/Math.max(1,bottomY-topY);
-      const key=[z,b.minLat.toFixed(4),b.maxLat.toFixed(4),b.minLng.toFixed(4),b.maxLng.toFixed(4),Math.round(w),Math.round(h)].join('|');
-      if(tileKey!==key){
-        tileKey=key;layer.innerHTML='';
-        let tx0=Math.floor(minX/256),tx1=Math.floor(maxX/256),ty0=Math.floor(topY/256),ty1=Math.floor(bottomY/256),count=0;
-        const maxTile=Math.pow(2,z)-1;
-        tx0=Math.max(0,tx0);ty0=Math.max(0,ty0);tx1=Math.min(maxTile,tx1);ty1=Math.min(maxTile,ty1);
-        for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++){
-          if(++count>72)break;
-          const img=document.createElement('img');
-          img.src=`https://tile.openstreetmap.org/${z}/${tx}/${ty}.png`;
-          img.alt='';img.decoding='async';
-          img.style.left=((tx*256-minX)*sx)+'px';img.style.top=((ty*256-topY)*sy)+'px';
-          img.style.width=(256*sx+1)+'px';img.style.height=(256*sy+1)+'px';
-          layer.appendChild(img);
-        }
-        const note=document.createElement('div');note.className='offline-map-note';note.textContent='Pontos, polígonos e rotas continuam disponíveis offline';layer.appendChild(note);
-      }
-      layer.style.transformOrigin='50% 50%';
-      layer.style.transform=`translate(${MAP.ox||0}px,${MAP.oy||0}px) scale(${MAP.zoom||1})`;
-    }catch(e){}
-  }
-
   try{
-    const oldMapScreen=mapScreen;
-    mapScreen=function(){
-      const r=oldMapScreen.apply(this,arguments);
-      setTimeout(function(){ensureTileLayer();renderBaseTiles();drawMap();},60);
-      return r;
+    syncScreen=function(){
+      load();
+      open(()=>{
+        const resumo=[
+          `${(D.produtores||[]).length} produtores`,
+          `${(D.atividades||[]).length} atividades`,
+          `${(D.veiculos||[]).length} veículos`,
+          `${(D.comunidades||[]).length} comunidades`
+        ].join(' · ');
+        $('#screen').innerHTML=`<div class="page-head">${back()}<div><h1>Sincronização</h1><p>${S.online?'Internet disponível':'Tudo continua salvo no celular'}</p></div></div><div class="sync-card"><div class="sync-status"><div class="sync-ring">⇅</div><div><b>${pending()} registro(s) aguardando</b><small>${esc(resumo)}</small></div></div><button class="btn primary full" style="margin-top:16px" onclick="syncNow()">⇅ Sincronizar</button><p class="help">O mesmo botão envia suas coletas e baixa produtores, atividades, veículos, comunidades, programações, pontos e demais atualizações.</p></div><div class="section-title"><h2>Fila local</h2></div><div class="card">${Q.map(q=>`<div class="queue-item"><span class="qicon">•</span><div class="qbody"><b>${esc(queueName(q.type))}</b><small>${esc(q.last_error||'Salvo no aparelho')}</small></div><span class="qstatus">${esc(queueStatus(q.status))}</span></div>`).join('')||'<div class="empty"><b>Nada pendente</b></div>'}</div>`;
+      });
     };
 
-    drawMap=function(){
-      const c=document.getElementById('mapCanvas');if(!c||!MAP.bounds)return;
-      renderBaseTiles();
-      const r=c.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);c.width=Math.max(1,Math.round(r.width*d));c.height=Math.max(1,Math.round(r.height*d));
-      const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);const w=r.width,h=r.height;x.clearRect(0,0,w,h);
-      if(!document.querySelector('.map-tile-layer img'))drawGrid(x,w,h);
-      for(const p of MAP.polys||[]){const pts=p.points.map(q=>project(q,w,h));if(pts.length<3)continue;x.beginPath();x.moveTo(pts[0].x,pts[0].y);pts.slice(1).forEach(pt=>x.lineTo(pt.x,pt.y));x.closePath();x.fillStyle=p.kind==='community'?'rgba(88,135,190,.08)':'rgba(14,107,69,.10)';x.strokeStyle=p.kind==='community'?'rgba(55,101,160,.55)':'rgba(14,107,69,.62)';x.lineWidth=1.4;x.fill();x.stroke();}
-      for(const r0 of MAP.routes||[]){const pts=r0.points.map(q=>project(q,w,h));if(pts.length<2)continue;x.beginPath();x.moveTo(pts[0].x,pts[0].y);pts.slice(1).forEach(pt=>x.lineTo(pt.x,pt.y));x.strokeStyle='#2563eb';x.lineWidth=4;x.lineCap='round';x.lineJoin='round';x.stroke();}
-      for(const item of MAP.items||[]){const p=project(item,w,h);x.beginPath();x.arc(p.x,p.y,item.kind==='visit'?6:5,0,Math.PI*2);x.fillStyle=item.kind==='visit'?'#e27a12':'#0e6b45';x.fill();x.strokeStyle='#fff';x.lineWidth=2.2;x.stroke();}
-      if(MAP.current&&Number.isFinite(+MAP.current.latitude)){const p=project({lat:+MAP.current.latitude,lng:+MAP.current.longitude},w,h);x.beginPath();x.arc(p.x,p.y,7.5,0,Math.PI*2);x.fillStyle='#7c3aed';x.fill();x.strokeStyle='#fff';x.lineWidth=2.5;x.stroke();x.beginPath();x.arc(p.x,p.y,14,0,Math.PI*2);x.strokeStyle='rgba(124,58,237,.32)';x.lineWidth=5;x.stroke();}
+    profile=function(){
+      load();const u=S.user||{},gs=S.groups||[];
+      $('#screen').innerHTML=`<div class="page-head"><div><h1>Perfil</h1><p>Configurações e dados do aparelho</p></div></div><div class="card"><div class="profile-head"><div class="avatar">${esc((u.nome||'U').slice(0,1))}</div><div><h2>${esc(u.nome||'Usuário')}</h2><p>${esc(u.matricula||u.username||'')} · ${esc(u.perfil_nome||u.perfil_codigo||'')}</p></div></div><div class="menu-list"><div class="menu-row"><span>◉</span><b>Grupo de trabalho</b><select onchange="changeGroup(this.value)">${gs.map(g=>`<option value="${g.id}" ${+g.id===+S.group_id?'selected':''}>${esc(g.nome)}</option>`).join('')}</select></div>${isManager()?`<button class="menu-row" onclick="approvals()"><span>✓</span><b>Aprovações</b><em>${(D.aprovacoes_programacoes||[]).length+(D.checklists_pendentes||[]).length}</em></button>`:''}<button class="menu-row" onclick="checklistReports()"><span>▰</span><b>Checklists de veículos</b><em>Ver relatórios</em></button><button class="menu-row" onclick="syncScreen()"><span>⇅</span><b>Sincronizar</b><em>${pending()} pendente(s)</em></button><button class="menu-row" onclick="logout()"><span>↪</span><b>Sair</b></button></div></div>`;
+    };
+
+    changeGroup=function(v){
+      const r=result(native('setGroup',+v));
+      if(r.ok){load();if(native('isOnline'))syncNow();else profile();}
     };
   }catch(e){}
 
-  // Ao voltar da rede, o status é atualizado imediatamente. O envio automático permanece ativo.
+  // ---------- mapa com base cartográfica ----------
+  const style=document.createElement('style');
+  style.textContent=`
+    .offline-map{position:relative!important;overflow:hidden!important;background:#e8efe9!important;min-height:360px}
+    .agro-tile-layer{position:absolute;inset:0;z-index:0;overflow:hidden;background:linear-gradient(180deg,#e8efe9,#f3f7f4)}
+    .agro-tile-layer img{position:absolute;display:block;max-width:none;pointer-events:none;user-select:none}
+    #mcanvas{position:relative!important;z-index:2!important;background:transparent!important;width:100%!important;height:100%!important;min-height:360px}
+    .map-watermark{z-index:4!important;background:rgba(255,255,255,.88)!important;padding:4px 7px!important;border-radius:8px!important}
+    .map-cache-note{position:absolute;left:10px;bottom:10px;z-index:4;padding:5px 8px;border-radius:9px;background:rgba(255,255,255,.88);font-size:10px;color:#60736b;font-weight:700}
+  `;
+  document.head.appendChild(style);
+
+  function clampLat(v){return Math.max(-85.0511,Math.min(85.0511,+v));}
+  function wx(lon,z){return ((+lon+180)/360)*256*Math.pow(2,z);}
+  function wy(lat,z){lat=clampLat(lat)*Math.PI/180;return (1-Math.log(Math.tan(lat)+1/Math.cos(lat))/Math.PI)/2*256*Math.pow(2,z);}
+  function boundsOf(all){
+    if(!all.length){const l=S.last_location||{};if(Number.isFinite(+l.latitude)&&Number.isFinite(+l.longitude))all=[{lat:+l.latitude,lng:+l.longitude}];}
+    if(!all.length)return null;
+    let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
+    all.forEach(p=>{if(Number.isFinite(+p.lat)&&Number.isFinite(+p.lng)){minLat=Math.min(minLat,+p.lat);maxLat=Math.max(maxLat,+p.lat);minLng=Math.min(minLng,+p.lng);maxLng=Math.max(maxLng,+p.lng);}});
+    if(minLat>maxLat)return null;
+    const dpLat=Math.max(.003,(maxLat-minLat)*.12),dpLng=Math.max(.003,(maxLng-minLng)*.12);
+    return {minLat:minLat-dpLat,maxLat:maxLat+dpLat,minLng:minLng-dpLng,maxLng:maxLng+dpLng};
+  }
+  function chooseZ(b,w,h){
+    const lon=Math.max(.0001,b.maxLng-b.minLng),lat=Math.max(.0001,b.maxLat-b.minLat);
+    return Math.max(5,Math.min(17,Math.floor(Math.min(Math.log2(Math.max(1,w/256)*360/lon),Math.log2(Math.max(1,h/256)*170/lat)))));
+  }
+  function tileLayer(b,w,h){
+    const shell=document.querySelector('.offline-map');if(!shell||!b)return;
+    let layer=shell.querySelector('.agro-tile-layer');if(!layer){layer=document.createElement('div');layer.className='agro-tile-layer';shell.insertBefore(layer,shell.firstChild);}
+    layer.innerHTML='';
+    const z=chooseZ(b,w,h),minX=wx(b.minLng,z),maxX=wx(b.maxLng,z),topY=wy(b.maxLat,z),bottomY=wy(b.minLat,z),sx=w/Math.max(1,maxX-minX),sy=h/Math.max(1,bottomY-topY);
+    let tx0=Math.floor(minX/256),tx1=Math.floor(maxX/256),ty0=Math.floor(topY/256),ty1=Math.floor(bottomY/256),count=0;const m=Math.pow(2,z)-1;
+    tx0=Math.max(0,tx0);ty0=Math.max(0,ty0);tx1=Math.min(m,tx1);ty1=Math.min(m,ty1);
+    for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++){
+      if(++count>72)break;
+      const img=document.createElement('img');img.alt='';img.decoding='async';img.src=`https://tile.openstreetmap.org/${z}/${tx}/${ty}.png`;
+      img.style.left=((tx*256-minX)*sx)+'px';img.style.top=((ty*256-topY)*sy)+'px';img.style.width=(256*sx+1)+'px';img.style.height=(256*sy+1)+'px';layer.appendChild(img);
+    }
+    const note=document.createElement('div');note.className='map-cache-note';note.textContent='Rotas e pontos funcionam offline';layer.appendChild(note);
+    const wm=shell.querySelector('.map-watermark');if(wm)wm.textContent='AgroDominium · © OpenStreetMap';
+  }
+
+  try{
+    const oldMap=map;
+    map=function(mode='mine'){
+      oldMap(mode);
+      setTimeout(function(){drawMap(mapItems(mode),routeMapItems(mode));},50);
+    };
+
+    drawMap=function(points,routes){
+      const c=document.getElementById('mcanvas');if(!c)return;
+      const rr=c.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),w=rr.width,h=Math.max(360,rr.height||360);
+      c.width=Math.max(1,Math.round(w*d));c.height=Math.max(1,Math.round(h*d));
+      const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);
+      const all=[...(points||[]),...(routes||[])],b=boundsOf(all);
+      if(!b){x.fillStyle='#789087';x.font='14px sans-serif';x.fillText('Nenhuma localização disponível. Sincronize a base.',22,45);return;}
+      tileLayer(b,w,h);
+      const latSpan=Math.max(.000001,b.maxLat-b.minLat),lngSpan=Math.max(.000001,b.maxLng-b.minLng);
+      const xy=p=>[(+p.lng-b.minLng)/lngSpan*w,h-(+p.lat-b.minLat)/latSpan*h];
+      const by={};(routes||[]).forEach(p=>(by[p.sessao]??=[]).push(p));
+      x.lineWidth=4;x.strokeStyle='#2563eb';x.lineCap='round';x.lineJoin='round';
+      Object.values(by).forEach(arr=>{x.beginPath();arr.forEach((p,i)=>{const [px,py]=xy(p);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();});
+      (points||[]).slice(0,5000).forEach((p,i)=>{const [px,py]=xy(p);x.fillStyle='#0b7a4d';x.beginPath();x.arc(px,py,5.2,0,Math.PI*2);x.fill();x.strokeStyle='#fff';x.lineWidth=2;x.stroke();if(i<60&&p.name){x.font='600 10px sans-serif';x.fillStyle='#17372c';x.fillText(String(p.name).slice(0,24),px+7,py-7);}});
+      const l=S.last_location||{};if(Number.isFinite(+l.latitude)&&Number.isFinite(+l.longitude)){const [px,py]=xy({lat:+l.latitude,lng:+l.longitude});x.fillStyle='#7c3aed';x.beginPath();x.arc(px,py,7,0,Math.PI*2);x.fill();x.strokeStyle='#fff';x.lineWidth=2;x.stroke();}
+    };
+  }catch(e){}
+
   window.agroNetworkChanged=function(on){
-    try{updateNet(!!on);load();if(on&&pending()>0)native('scheduleAutoSync');if(typeof TAB!=='undefined'&&TAB==='home'&&!FORM)home();}catch(e){}
+    try{net(!!on);S.online=!!on;if(on&&pending()>0)native('scheduleAutoSync');if(tab==='home'&&!form)home();}catch(e){}
   };
 })();
