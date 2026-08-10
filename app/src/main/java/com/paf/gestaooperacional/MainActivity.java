@@ -9,11 +9,13 @@ import android.graphics.BitmapFactory;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Base64;
@@ -44,14 +46,16 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.Locale;
 import java.util.UUID;
 
 public class MainActivity extends Activity {
     private static final String LOCAL_URL="file:///android_asset/app/index.html";
     private static final String SITE="https://salmon-woodcock-375027.hostingersite.com/";
-    private static final int REQ_LOCATION=1001,REQ_CAMERA=1002,REQ_FILE=1003,REQ_NOTIFY=1004,REQ_DIRECT_CAMERA=1005;
+    private static final int REQ_LOCATION=1001,REQ_CAMERA=1002,REQ_FILE=1003,REQ_NOTIFY=1004,REQ_DIRECT_CAMERA=1005,REQ_AUDIO=1006;
     private WebView webView;private ProgressBar progressBar;private ValueCallback<Uri[]> fileCallback;private GeolocationPermissions.Callback geoCallback;private String geoOrigin;private FrameLayout root;
     private String pendingLocationTag,directCameraTag;private File directCameraFile;
+    private MediaRecorder audioRecorder;private File audioFile;private String audioTag,pendingAudioTag;private long audioStartedAt;
 
     @Override protected void onCreate(Bundle savedInstanceState){
         super.onCreate(savedInstanceState);WindowCompat.setDecorFitsSystemWindows(getWindow(),false);getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
@@ -64,10 +68,23 @@ public class MainActivity extends Activity {
     }
 
     private void configureWebView(){
-        WebSettings s=webView.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setDatabaseEnabled(true);s.setGeolocationEnabled(true);s.setAllowFileAccess(true);s.setAllowContentAccess(true);s.setMediaPlaybackRequiresUserGesture(false);s.setSupportZoom(false);s.setBuiltInZoomControls(false);s.setTextZoom(100);s.setUserAgentString(s.getUserAgentString()+" AgroDominiumAndroid/2.2");
+        WebSettings s=webView.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setDatabaseEnabled(true);s.setGeolocationEnabled(true);s.setAllowFileAccess(true);s.setAllowContentAccess(true);s.setMediaPlaybackRequiresUserGesture(false);s.setSupportZoom(false);s.setBuiltInZoomControls(false);s.setTextZoom(100);s.setUserAgentString(s.getUserAgentString()+" AgroDominiumAndroid/2.3");
         CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(webView,true);webView.addJavascriptInterface(new AgroBridge(this),"AgroNative");
         webView.setWebViewClient(new WebViewClient(){@Override public boolean shouldOverrideUrlLoading(WebView view,android.webkit.WebResourceRequest req){Uri uri=req.getUrl();String scheme=uri.getScheme();if("file".equalsIgnoreCase(scheme))return false;if(("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme))&&uri.getHost()!=null&&uri.getHost().endsWith("hostingersite.com"))return false;try{startActivity(new Intent(Intent.ACTION_VIEW,uri));return true;}catch(Exception e){return false;}}@Override public void onPageFinished(WebView view,String url){CookieManager.getInstance().flush();if(url.startsWith(LOCAL_URL))evalJs("window.agroNetworkChanged && window.agroNetworkChanged("+ApiClient.isOnline(MainActivity.this)+");");}});
-        webView.setWebChromeClient(new WebChromeClient(){@Override public void onProgressChanged(WebView view,int p){progressBar.setProgress(p);progressBar.setVisibility(p>=100?View.GONE:View.VISIBLE);}@Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb){if(hasLocationPermission())cb.invoke(origin,true,false);else{geoOrigin=origin;geoCallback=cb;requestLocationPermission();}}@Override public boolean onShowFileChooser(WebView w,ValueCallback<Uri[]> cb,FileChooserParams params){if(fileCallback!=null)fileCallback.onReceiveValue(null);fileCallback=cb;Intent content=new Intent(Intent.ACTION_OPEN_DOCUMENT);content.addCategory(Intent.CATEGORY_OPENABLE);content.setType("image/*");content.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);try{startActivityForResult(Intent.createChooser(content,"Selecionar fotos"),REQ_FILE);return true;}catch(Exception e){fileCallback=null;Toast.makeText(MainActivity.this,"Não foi possível abrir a galeria.",Toast.LENGTH_LONG).show();return false;}}});
+        webView.setWebChromeClient(new WebChromeClient(){
+            @Override public void onProgressChanged(WebView view,int p){progressBar.setProgress(p);progressBar.setVisibility(p>=100?View.GONE:View.VISIBLE);}
+            @Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb){if(hasLocationPermission())cb.invoke(origin,true,false);else{geoOrigin=origin;geoCallback=cb;requestLocationPermission();}}
+            @Override public boolean onShowFileChooser(WebView w,ValueCallback<Uri[]> cb,FileChooserParams params){
+                if(fileCallback!=null)fileCallback.onReceiveValue(null);fileCallback=cb;
+                Intent content=new Intent(Intent.ACTION_OPEN_DOCUMENT);content.addCategory(Intent.CATEGORY_OPENABLE);content.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+                String accepts="";try{accepts=String.join(",",params.getAcceptTypes()).toLowerCase(Locale.ROOT);}catch(Exception ignored){}
+                if(accepts.contains("pdf")||accepts.contains("audio")||accepts.contains("*/*")){
+                    content.setType("*/*");
+                    content.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","application/pdf","audio/*"});
+                }else content.setType("image/*");
+                try{startActivityForResult(Intent.createChooser(content,"Selecionar arquivos"),REQ_FILE);return true;}catch(Exception e){fileCallback=null;Toast.makeText(MainActivity.this,"Não foi possível abrir os arquivos do aparelho.",Toast.LENGTH_LONG).show();return false;}
+            }
+        });
     }
 
     public void evalJs(String js){if(webView!=null)webView.evaluateJavascript(js,null);}
@@ -97,12 +114,57 @@ public class MainActivity extends Activity {
     private String previewData(File f){try{Bitmap src=BitmapFactory.decodeFile(f.getAbsolutePath());if(src==null)return "";int w=src.getWidth(),h=src.getHeight(),max=360;Bitmap out=src;if(Math.max(w,h)>max){float k=(float)max/Math.max(w,h);out=Bitmap.createScaledBitmap(src,Math.round(w*k),Math.round(h*k),true);}ByteArrayOutputStream b=new ByteArrayOutputStream();out.compress(Bitmap.CompressFormat.JPEG,65,b);String data="data:image/jpeg;base64,"+Base64.encodeToString(b.toByteArray(),Base64.NO_WRAP);if(out!=src)out.recycle();src.recycle();return data;}catch(Exception e){return "";}}
     private void cameraCallback(String tag,File file,String error){try{JSONObject o=new JSONObject();boolean ok=file!=null&&file.isFile()&&file.length()>0;o.put("ok",ok);if(ok){o.put("path",file.getAbsolutePath());o.put("name",file.getName());o.put("preview",previewData(file));}else o.put("error",error==null?"Foto não registrada.":error);evalJs("window.agroCameraResult && window.agroCameraResult("+JSONObject.quote(tag)+","+JSONObject.quote(o.toString())+");");}catch(Exception ignored){}}
 
+    public void startAudioRecording(String tag){
+        runOnUiThread(()->{
+            try{
+                if(audioRecorder!=null){audioCallback(tag,null,0,"Já existe uma gravação em andamento.");return;}
+                if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){pendingAudioTag=tag;ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.RECORD_AUDIO},REQ_AUDIO);return;}
+                File dir=new File(getFilesDir(),"offline_audio");if(!dir.exists()&&!dir.mkdirs())throw new IOException("Pasta de áudio indisponível.");
+                audioFile=new File(dir,"audio_"+UUID.randomUUID()+".m4a");audioTag=tag;
+                audioRecorder=Build.VERSION.SDK_INT>=31?new MediaRecorder(this):new MediaRecorder();
+                audioRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+                audioRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+                audioRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+                audioRecorder.setAudioEncodingBitRate(96000);
+                audioRecorder.setAudioSamplingRate(44100);
+                audioRecorder.setOutputFile(audioFile.getAbsolutePath());
+                audioRecorder.prepare();audioRecorder.start();audioStartedAt=SystemClock.elapsedRealtime();
+                try{JSONObject o=new JSONObject().put("ok",true).put("recording",true);evalJs("window.agroAudioStarted && window.agroAudioStarted("+JSONObject.quote(tag)+","+JSONObject.quote(o.toString())+");");}catch(Exception ignored){}
+            }catch(Exception e){releaseAudio(true);audioCallback(tag,null,0,"Não foi possível iniciar a gravação de áudio.");}
+        });
+    }
+
+    public void stopAudioRecording(String tag){
+        runOnUiThread(()->{
+            if(audioRecorder==null){audioCallback(tag,null,0,"Nenhuma gravação em andamento.");return;}
+            File f=audioFile;long ms=Math.max(0,SystemClock.elapsedRealtime()-audioStartedAt);String cbTag=audioTag==null?tag:audioTag;
+            try{audioRecorder.stop();}catch(Exception e){if(f!=null)f.delete();releaseAudio(false);audioCallback(cbTag,null,0,"A gravação ficou curta demais. Tente novamente.");return;}
+            releaseAudio(false);audioCallback(cbTag,f,ms/1000.0,null);
+        });
+    }
+
+    private void releaseAudio(boolean delete){
+        try{if(audioRecorder!=null){audioRecorder.reset();audioRecorder.release();}}catch(Exception ignored){}
+        if(delete&&audioFile!=null)try{audioFile.delete();}catch(Exception ignored){}
+        audioRecorder=null;audioFile=null;audioTag=null;audioStartedAt=0;
+    }
+
+    private void audioCallback(String tag,File f,double duration,String error){
+        try{
+            JSONObject o=new JSONObject();boolean ok=f!=null&&f.isFile()&&f.length()>0;o.put("ok",ok);
+            if(ok){o.put("path",f.getAbsolutePath());o.put("name",f.getName());o.put("mime","audio/mp4");o.put("duration",duration);o.put("duracao_segundos",duration);}
+            else o.put("error",error==null?"Áudio não registrado.":error);
+            evalJs("window.agroAudioResult && window.agroAudioResult("+JSONObject.quote(tag)+","+JSONObject.quote(o.toString())+");");
+        }catch(Exception ignored){}
+    }
+
     public void openOnlinePage(String path){runOnUiThread(()->{if(!ApiClient.isOnline(this)){Toast.makeText(this,"Sem internet. Continue usando os dados offline.",Toast.LENGTH_LONG).show();return;}String p=path==null?"":path.replaceFirst("^/+","");webView.loadUrl(SITE+p);});}
     private void requestBasePermissions(){if(!hasLocationPermission())requestLocationPermission();if(ContextCompat.checkSelfPermission(this,Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED)ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.CAMERA},REQ_CAMERA);if(Build.VERSION.SDK_INT>=33&&ContextCompat.checkSelfPermission(this,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.POST_NOTIFICATIONS},REQ_NOTIFY);}
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(requestCode==REQ_DIRECT_CAMERA){File f=directCameraFile;String tag=directCameraTag;directCameraFile=null;directCameraTag=null;if(resultCode==RESULT_OK&&f!=null&&f.isFile()){optimizeCameraFile(f);cameraCallback(tag,f,null);}else cameraCallback(tag,null,"A foto foi cancelada.");return;}if(requestCode!=REQ_FILE||fileCallback==null)return;Uri[] result=null;if(resultCode==RESULT_OK&&data!=null){if(data.getClipData()!=null){int c=data.getClipData().getItemCount();result=new Uri[c];for(int i=0;i<c;i++)result[i]=data.getClipData().getItemAt(i).getUri();}else if(data.getData()!=null)result=new Uri[]{data.getData()};}fileCallback.onReceiveValue(result);fileCallback=null;}
-    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grants){super.onRequestPermissionsResult(requestCode,permissions,grants);if(requestCode==REQ_LOCATION){boolean g=hasLocationPermission();if(geoCallback!=null){geoCallback.invoke(geoOrigin,g,false);geoCallback=null;geoOrigin=null;}if(g)retryPendingGps();else if(pendingLocationTag!=null){String t=pendingLocationTag;pendingLocationTag=null;locationCallback(t,null,"Permissão de localização negada.");}}}
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grants){super.onRequestPermissionsResult(requestCode,permissions,grants);if(requestCode==REQ_LOCATION){boolean g=hasLocationPermission();if(geoCallback!=null){geoCallback.invoke(geoOrigin,g,false);geoCallback=null;geoOrigin=null;}if(g)retryPendingGps();else if(pendingLocationTag!=null){String t=pendingLocationTag;pendingLocationTag=null;locationCallback(t,null,"Permissão de localização negada.");}}else if(requestCode==REQ_AUDIO){String t=pendingAudioTag;pendingAudioTag=null;if(t!=null){if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)startAudioRecording(t);else audioCallback(t,null,0,"Permissão do microfone negada.");}}}
     @Override protected void onResume(){super.onResume();if(webView!=null)evalJs("window.agroNetworkChanged && window.agroNetworkChanged("+ApiClient.isOnline(this)+");");retryPendingGps();}
     @Override protected void onPause(){CookieManager.getInstance().flush();super.onPause();}
+    @Override protected void onDestroy(){if(audioRecorder!=null)releaseAudio(true);super.onDestroy();}
     @Override public void onBackPressed(){if(webView!=null&&webView.canGoBack())webView.goBack();else evalJs("window.appBack && window.appBack();");}
 }
