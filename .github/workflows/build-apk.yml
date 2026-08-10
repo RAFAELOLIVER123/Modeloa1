@@ -15,6 +15,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validar JavaScript
+        run: |
+          node --check app/src/main/assets/app/app.js
+          node --check app/src/main/assets/app/fix-v226.js
+          node --check app/src/main/assets/app/fix-v227.js
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
