@@ -9,7 +9,8 @@
   function ready(){
     const s=state(),snap=snapshot(),u=s.user||{},d=snap.data||{};
     const hasUser=!!(u.nome||u.username||u.matricula);
-    const hasData=['produtores','programacoes','comunidades','polos','atividades','veiculos','plantios'].some(k=>Array.isArray(d[k]));
+    const baseKeys=['produtores','programacoes','comunidades','polos','atividades','veiculos','plantios'];
+    const hasData=baseKeys.some(k=>Array.isArray(d[k])&&d[k].length>0);
     return !!s.authenticated && !!s.has_snapshot && hasUser && hasData;
   }
   function button(text,disabled){
@@ -51,8 +52,8 @@
 
     loginTimer=setTimeout(function(){
       button('Entrar',false);
-      notify('A conexão demorou demais. Confira a internet e tente novamente.','bad');
-    },50000);
+      notify('O download das bases demorou demais. Confira a internet e tente novamente.','bad');
+    },120000);
   };
 
   window.agroLoginProgress=function(payload){
@@ -79,9 +80,9 @@
       }else{
         button('Entrar',false);
         showLogin();
-        notify('O acesso foi validado, mas os dados ainda não foram baixados. Tente novamente com a internet ativa.','bad');
+        notify('O acesso foi validado, mas as bases vieram vazias. Entre novamente com a internet ativa para baixar produtores, atividades e cadastros.','bad');
       }
-    },250);
+    },350);
   };
 
   function enterHandler(e){
