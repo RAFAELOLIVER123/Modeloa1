@@ -19,13 +19,103 @@ public class SyncEngine {
         if(token.isEmpty())throw new IllegalStateException("Faça login com internet pelo menos uma vez neste aparelho.");
         int gid=requestedGroup>0?requestedGroup:parseInt(db.getSetting("group_id","0"));
         if(gid<=0)gid=1;
-        JSONObject j;
-        try{j=ApiClient.bootstrap(token,gid);}catch(Exception principal){if(!CompatClient.hasSession(ctx))throw principal;j=CompatClient.bootstrap(ctx,gid);}
+
+        JSONObject apiSnapshot=null;
+        Exception apiError=null;
+        try{
+            apiSnapshot=ApiClient.bootstrap(token,gid);
+        }catch(Exception e){
+            apiError=e;
+        }
+
+        JSONObject j=apiSnapshot;
+
+        // A lógica estável da 2.2.0 mantinha uma sessão web paralela. Ela é usada
+        // quando a API móvel falha ou responde sem as listas necessárias para os formulários.
+        if(CompatClient.hasSession(ctx)){
+            boolean precisaCompat = apiSnapshot==null || !hasUsefulBase(apiSnapshot);
+            if(precisaCompat){
+                try{
+                    JSONObject compat=CompatClient.bootstrap(ctx,gid);
+                    if(apiSnapshot==null){
+                        j=compat;
+                    }else{
+                        j=mergeMissingBase(apiSnapshot,compat);
+                    }
+                }catch(Exception compatError){
+                    if(apiSnapshot==null){
+                        if(apiError!=null)throw apiError;
+                        throw compatError;
+                    }
+                }
+            }else{
+                // Mesmo com a API funcional, completa listas vazias com a base web.
+                try{
+                    JSONObject compat=CompatClient.bootstrap(ctx,gid);
+                    j=mergeMissingBase(apiSnapshot,compat);
+                }catch(Exception ignored){}
+            }
+        }
+
+        if(j==null){
+            if(apiError!=null)throw apiError;
+            throw new IllegalStateException("Não foi possível baixar a base do servidor.");
+        }
+
+        if(!hasUsefulBase(j)){
+            throw new IllegalStateException("O servidor respondeu, mas não trouxe as bases de atividades, comunidades, polos, produtores ou veículos.");
+        }
+
         db.saveSnapshot(j.toString());
         db.putSetting("group_id",String.valueOf(j.optInt("group_id",gid)));
         if(j.has("user"))db.putSetting("user_json",j.getJSONObject("user").toString());
         if(j.has("groups"))db.putSetting("groups_json",j.getJSONArray("groups").toString());
         return j;
+    }
+
+    private static boolean hasUsefulBase(JSONObject root){
+        if(root==null)return false;
+        JSONObject data=root.optJSONObject("data");
+        if(data==null)return false;
+        String[] keys={"atividades","comunidades","polos","produtores","veiculos","programacoes","plantios"};
+        for(String key:keys){
+            JSONArray a=data.optJSONArray(key);
+            if(a!=null&&a.length()>0)return true;
+        }
+        return false;
+    }
+
+    private static JSONObject mergeMissingBase(JSONObject primary,JSONObject fallback){
+        try{
+            JSONObject out=new JSONObject(primary.toString());
+            JSONObject pd=out.optJSONObject("data");
+            JSONObject fd=fallback==null?null:fallback.optJSONObject("data");
+            if(pd==null){
+                pd=new JSONObject();
+                out.put("data",pd);
+            }
+            if(fd!=null){
+                String[] keys={
+                    "polos","comunidades","atividades","veiculos","checklist_veiculo_itens",
+                    "programacoes","aprovacoes_programacoes","produtores","plantios","pontos",
+                    "equipe","sessoes","localizacoes","checklists_veiculo","checklists_pendentes",
+                    "movimentacoes_veiculos"
+                };
+                for(String key:keys){
+                    JSONArray atual=pd.optJSONArray(key);
+                    JSONArray reserva=fd.optJSONArray(key);
+                    if((atual==null||atual.length()==0)&&reserva!=null&&reserva.length()>0){
+                        pd.put(key,reserva);
+                    }
+                }
+            }
+            if((!out.has("user")||out.optJSONObject("user")==null)&&fallback!=null&&fallback.has("user"))out.put("user",fallback.getJSONObject("user"));
+            if((!out.has("groups")||out.optJSONArray("groups")==null)&&fallback!=null&&fallback.has("groups"))out.put("groups",fallback.getJSONArray("groups"));
+            if(out.optInt("group_id",0)<=0&&fallback!=null)out.put("group_id",fallback.optInt("group_id",1));
+            return out;
+        }catch(Exception e){
+            return primary!=null?primary:fallback;
+        }
     }
 
     public static JSONObject syncAll(Context ctx,Progress progress,boolean refreshAfter) throws Exception {
