@@ -20,6 +20,7 @@ jobs:
           node --check app/src/main/assets/app/app.js
           node --check app/src/main/assets/app/fix-v226.js
           node --check app/src/main/assets/app/fix-v227.js
+          node --check app/src/main/assets/app/fix-v227b.js
 
       - name: Java 17
         uses: actions/setup-java@v4
