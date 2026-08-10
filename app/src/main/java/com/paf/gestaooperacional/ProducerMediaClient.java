@@ -88,9 +88,9 @@ public final class ProducerMediaClient {
         if(!meta.isEmpty()){
             try{JSONObject m=new JSONObject(meta);File f=new File(m.optString("path",""));if(f.isFile())return new CachedFile(f,m.optString("mime","application/octet-stream"),m.optString("name","arquivo"),true);}catch(Exception ignored){}
         }
-        if(!ApiClient.isOnline(ctx))throw new IllegalStateException("Este arquivo ainda não foi aberto neste aparelho e não está disponível offline.");
+        if(!ApiClient.isOnline(ctx))throw new IllegalStateException("Este arquivo ainda não foi baixado neste aparelho e não está disponível offline.");
         BinaryResponse r=binary(ctx,"download.php?id="+fileId);if(r.code<200||r.code>=400||r.bytes.length==0)throw new IllegalStateException("Não foi possível baixar o arquivo.");
-        File dir=new File(ctx.getCacheDir(),"producer_media");if(!dir.exists()&&!dir.mkdirs())throw new IllegalStateException("Não foi possível preparar o armazenamento local.");String ext=extensionFor(r.mime,r.name);File f=new File(dir,"produtor_"+fileId+ext);try(FileOutputStream out=new FileOutputStream(f)){out.write(r.bytes);}JSONObject m=new JSONObject().put("path",f.getAbsolutePath()).put("mime",r.mime).put("name",r.name);db.putSetting(metaKey,m.toString());return new CachedFile(f,r.mime,r.name,false);
+        File dir=new File(ctx.getFilesDir(),"producer_media");if(!dir.exists()&&!dir.mkdirs())throw new IllegalStateException("Não foi possível preparar o armazenamento local.");String ext=extensionFor(r.mime,r.name);File f=new File(dir,"produtor_"+fileId+ext);try(FileOutputStream out=new FileOutputStream(f)){out.write(r.bytes);}JSONObject m=new JSONObject().put("path",f.getAbsolutePath()).put("mime",r.mime).put("name",r.name);db.putSetting(metaKey,m.toString());return new CachedFile(f,r.mime,r.name,false);
     }
 
     private static TextResponse text(Context ctx,String path) throws Exception {
@@ -102,7 +102,7 @@ public final class ProducerMediaClient {
     }
 
     private static HttpURLConnection open(Context ctx,String path) throws Exception {
-        HttpURLConnection c=(HttpURLConnection)new URL(ROOT+path).openConnection();c.setRequestMethod("GET");c.setConnectTimeout(20000);c.setReadTimeout(90000);c.setUseCaches(false);c.setRequestProperty("User-Agent","AgroDominium-Android/2.2.6");String cookie=OfflineDb.get(ctx).getSetting("web_cookie","");if(!cookie.isEmpty())c.setRequestProperty("Cookie",cookie);return c;
+        HttpURLConnection c=(HttpURLConnection)new URL(ROOT+path).openConnection();c.setRequestMethod("GET");c.setConnectTimeout(20000);c.setReadTimeout(90000);c.setUseCaches(false);c.setRequestProperty("User-Agent","AgroDominium-Android/2.3");String cookie=OfflineDb.get(ctx).getSetting("web_cookie","");if(!cookie.isEmpty())c.setRequestProperty("Cookie",cookie);return c;
     }
 
     private static byte[] readAll(InputStream in,int max) throws Exception {if(in==null)return new byte[0];ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buf=new byte[32768];int n,total=0;while((n=in.read(buf))>0){total+=n;if(total>max)throw new IllegalStateException("Arquivo acima do limite de visualização do aplicativo.");out.write(buf,0,n);}return out.toByteArray();}
