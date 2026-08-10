@@ -4,7 +4,6 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.NetworkInfo;
 
 import org.json.JSONObject;
 
@@ -24,28 +23,26 @@ public class ApiClient {
         try {
             ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
             if(cm==null)return false;
-
             Network n=cm.getActiveNetwork();
-            if(n!=null){
-                NetworkCapabilities c=cm.getNetworkCapabilities(n);
-                if(c!=null){
-                    if(c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))return true;
-                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return true;
-                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return true;
-                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return true;
-                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return true;
-                }
-            }
-
-            NetworkInfo info=cm.getActiveNetworkInfo();
-            return info!=null && info.isConnected();
+            if(n==null)return false;
+            NetworkCapabilities c=cm.getNetworkCapabilities(n);
+            if(c==null)return false;
+            return c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    || c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                    || c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    || c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                    || c.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
         } catch(Exception e) {
             return false;
         }
     }
 
     public static JSONObject login(String login,String password,String deviceId,String deviceName) throws Exception {
-        JSONObject b=new JSONObject();b.put("login",login);b.put("password",password);b.put("device_id",deviceId);b.put("device_name",deviceName);
+        JSONObject b=new JSONObject();
+        b.put("login",login);
+        b.put("password",password);
+        b.put("device_id",deviceId);
+        b.put("device_name",deviceName);
         return request("POST",BASE+"?action=login",null,b.toString());
     }
 
@@ -53,21 +50,27 @@ public class ApiClient {
         return request("GET",BASE+"?action=bootstrap&completo=1&group_id="+groupId,token,null);
     }
 
-    public static JSONObject sync(String token,JSONObject operation) throws Exception { return request("POST",BASE+"?action=sync",token,operation.toString()); }
-    public static JSONObject logout(String token) throws Exception { return request("POST",BASE+"?action=logout",token,"{}"); }
-    public static JSONObject status() throws Exception { return request("GET",BASE+"?action=status",null,null); }
+    public static JSONObject sync(String token,JSONObject operation) throws Exception {
+        return request("POST",BASE+"?action=sync",token,operation.toString());
+    }
+    public static JSONObject logout(String token) throws Exception {
+        return request("POST",BASE+"?action=logout",token,"{}");
+    }
+    public static JSONObject status() throws Exception {
+        return request("GET",BASE+"?action=status",null,null);
+    }
 
     private static JSONObject request(String method,String url,String token,String body) throws Exception {
         HttpURLConnection c=null;
         try{
             c=(HttpURLConnection)new URL(url).openConnection();
             c.setRequestMethod(method);
-            c.setConnectTimeout(20000);
-            c.setReadTimeout(180000);
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(35000);
             c.setUseCaches(false);
             c.setRequestProperty("Accept","application/json");
             c.setRequestProperty("Accept-Language","pt-BR,pt;q=0.9");
-            c.setRequestProperty("User-Agent","AgroDominium-Android/2.2.2");
+            c.setRequestProperty("User-Agent","AgroDominium-Android/2.2.3");
             if(token!=null&&!token.isEmpty())c.setRequestProperty("Authorization","Bearer "+token);
             if(body!=null){
                 byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
@@ -80,19 +83,26 @@ public class ApiClient {
             InputStream in=code>=200&&code<400?c.getInputStream():c.getErrorStream();
             String text=readAll(in);
             JSONObject j;
-            try{j=new JSONObject(text);}catch(Exception e){throw new IOException("O servidor respondeu em um formato inválido (HTTP "+code+").");}
+            try{j=new JSONObject(text);}catch(Exception e){
+                throw new IOException("O servidor respondeu em um formato inválido (HTTP "+code+").");
+            }
             if(code<200||code>=300||!j.optBoolean("ok",false)){
                 String err=j.optString("error","Falha de comunicação com o servidor (HTTP "+code+").");
                 throw new ApiException(code,err);
             }
             return j;
-        }finally{if(c!=null)c.disconnect();}
+        }finally{
+            if(c!=null)c.disconnect();
+        }
     }
 
     private static String readAll(InputStream in) throws IOException {
         if(in==null)return "";
         StringBuilder sb=new StringBuilder();
-        try(BufferedReader r=new BufferedReader(new InputStreamReader(in,StandardCharsets.UTF_8))){String line;while((line=r.readLine())!=null)sb.append(line);}
+        try(BufferedReader r=new BufferedReader(new InputStreamReader(in,StandardCharsets.UTF_8))){
+            String line;
+            while((line=r.readLine())!=null)sb.append(line);
+        }
         return sb.toString();
     }
 
