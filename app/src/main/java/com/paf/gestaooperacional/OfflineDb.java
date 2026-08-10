@@ -68,6 +68,29 @@ public class OfflineDb extends SQLiteOpenHelper {
     public synchronized String finishActiveRoute(){String uuid=getActiveRouteUuid();if(uuid==null)return null;ContentValues v=new ContentValues();v.put("ended_at",nowSql());v.put("status","FINALIZADA");v.put("updated_at",System.currentTimeMillis());getWritableDatabase().update("routes",v,"uuid=?",new String[]{uuid});return uuid;}
     public synchronized JSONObject buildRoutePayload(String routeUuid) throws JSONException {JSONObject p=new JSONObject();try(Cursor c=getReadableDatabase().rawQuery("SELECT uuid,programacao_ref,title,started_at,ended_at,status FROM routes WHERE uuid=? LIMIT 1",new String[]{routeUuid})){if(!c.moveToFirst())throw new JSONException("Rota local não encontrada");p.put("route_uuid",c.getString(0));String pref=c.getString(1);if(pref!=null&&!pref.isEmpty()){if(pref.matches("\\d+"))p.put("programacao_id",Long.parseLong(pref));else p.put("programacao_client_uuid",pref);}p.put("title",c.getString(2));p.put("started_at",c.getString(3));if(c.getString(4)!=null)p.put("ended_at",c.getString(4));p.put("status",c.getString(5));}JSONArray pts=new JSONArray();try(Cursor c=getReadableDatabase().rawQuery("SELECT uuid,latitude,longitude,accuracy,altitude,speed,bearing,captured_at FROM route_points WHERE route_uuid=? ORDER BY id",new String[]{routeUuid})){while(c.moveToNext()){JSONObject x=new JSONObject();x.put("uuid",c.getString(0));x.put("latitude",c.getDouble(1));x.put("longitude",c.getDouble(2));if(!c.isNull(3))x.put("accuracy",c.getDouble(3));if(!c.isNull(4))x.put("altitude",c.getDouble(4));if(!c.isNull(5))x.put("speed",c.getDouble(5));if(!c.isNull(6))x.put("bearing",c.getDouble(6));x.put("captured_at",c.getString(7));pts.put(x);}}p.put("points",pts);return p;}
     public synchronized void markRouteSynced(String routeUuid){ContentValues v=new ContentValues();v.put("synced",1);v.put("updated_at",System.currentTimeMillis());getWritableDatabase().update("routes",v,"uuid=?",new String[]{routeUuid});}
+
+    public synchronized JSONObject localMapData() throws JSONException {
+        JSONObject out=new JSONObject();
+        JSONArray routes=new JSONArray();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT uuid,group_id,programacao_ref,title,started_at,ended_at,status,synced FROM routes ORDER BY created_at DESC LIMIT 120",null)){
+            while(c.moveToNext()){
+                JSONObject r=new JSONObject();String uuid=c.getString(0);
+                r.put("uuid",uuid);r.put("group_id",c.getInt(1));r.put("programacao_ref",c.getString(2));r.put("title",c.getString(3));r.put("started_at",c.getString(4));r.put("ended_at",c.getString(5));r.put("status",c.getString(6));r.put("synced",c.getInt(7));
+                JSONArray pts=new JSONArray();
+                try(Cursor p=getReadableDatabase().rawQuery("SELECT latitude,longitude,accuracy,altitude,speed,bearing,captured_at FROM route_points WHERE route_uuid=? ORDER BY id",new String[]{uuid})){
+                    while(p.moveToNext()){
+                        JSONObject x=new JSONObject();x.put("latitude",p.getDouble(0));x.put("longitude",p.getDouble(1));if(!p.isNull(2))x.put("accuracy",p.getDouble(2));if(!p.isNull(3))x.put("altitude",p.getDouble(3));if(!p.isNull(4))x.put("speed",p.getDouble(4));if(!p.isNull(5))x.put("bearing",p.getDouble(5));x.put("captured_at",p.getString(6));pts.put(x);
+                    }
+                }
+                r.put("points",pts);routes.put(r);
+            }
+        }
+        out.put("routes",routes);
+        String last=getSetting("last_location","");
+        if(!last.isEmpty()){try{out.put("last_location",new JSONObject(last));}catch(Exception ignored){}}
+        return out;
+    }
+
     public synchronized JSONObject stats() throws JSONException {JSONObject o=new JSONObject();o.put("pending",pendingCount());o.put("snapshot_at",getSnapshotTime());o.put("has_snapshot",!getSnapshot().isEmpty());o.put("route",routeStatus());return o;}
     public synchronized void logoutKeepData(){removeSetting("token");removeSetting("user_json");removeSetting("groups_json");}
     public synchronized void clearEverything(){SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{db.delete("sync_queue",null,null);db.delete("route_points",null,null);db.delete("routes",null,null);db.delete("snapshot",null,null);db.delete("settings",null,null);db.setTransactionSuccessful();}finally{db.endTransaction();}}
