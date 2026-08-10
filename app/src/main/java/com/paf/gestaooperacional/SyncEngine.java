@@ -120,12 +120,16 @@ public class SyncEngine {
                     JSONObject payload=new JSONObject(q.optString("payload_json","{}"));
                     if("route.sync".equals(type)){String ru=payload.optString("route_uuid",q.getString("client_uuid"));payload=db.buildRoutePayload(ru);}
                     JSONObject response;
-                    try{
-                        JSONObject op=new JSONObject();op.put("client_uuid",q.getString("client_uuid"));op.put("type",type);op.put("group_id",q.optInt("group_id",parseInt(db.getSetting("group_id","0"))));
-                        JSONObject apiPayload=new JSONObject(payload.toString());
-                        if("vehicle_checklist.create".equals(type)){String sigPath=apiPayload.optString("assinatura_path_local","");if(!sigPath.isEmpty()){apiPayload.remove("assinatura_path_local");apiPayload.put("assinatura_tecnico",encodeOneFile(sigPath,"assinatura-tecnico"));}}
-                        op.put("payload",apiPayload);op.put("photos",encodePhotos(q.optString("photos_json","[]")));response=ApiClient.sync(token,op);
-                    }catch(Exception apiError){if(!CompatClient.hasSession(ctx))throw apiError;response=CompatClient.syncOperation(ctx,type,payload,q.optString("photos_json","[]"));}
+                    if("estimativa.save".equals(type)){
+                        response=EstimateClient.sync(ctx,payload,q.optString("photos_json","[]"));
+                    }else{
+                        try{
+                            JSONObject op=new JSONObject();op.put("client_uuid",q.getString("client_uuid"));op.put("type",type);op.put("group_id",q.optInt("group_id",parseInt(db.getSetting("group_id","0"))));
+                            JSONObject apiPayload=new JSONObject(payload.toString());
+                            if("vehicle_checklist.create".equals(type)){String sigPath=apiPayload.optString("assinatura_path_local","");if(!sigPath.isEmpty()){apiPayload.remove("assinatura_path_local");apiPayload.put("assinatura_tecnico",encodeOneFile(sigPath,"assinatura-tecnico"));}}
+                            op.put("payload",apiPayload);op.put("photos",encodePhotos(q.optString("photos_json","[]")));response=ApiClient.sync(token,op);
+                        }catch(Exception apiError){if(!CompatClient.hasSession(ctx))throw apiError;response=CompatClient.syncOperation(ctx,type,payload,q.optString("photos_json","[]"));}
+                    }
                     db.markSynced(id,response.toString());
                     if("route.sync".equals(type))db.markRouteSynced(payload.optString("route_uuid",q.getString("client_uuid")));
                     done++;houveSucesso=true;
@@ -166,7 +170,7 @@ public class SyncEngine {
     private static byte[] readFile(File f) throws Exception{long len=f.length();if(len>12L*1024*1024)throw new IllegalStateException("O arquivo "+f.getName()+" ultrapassa 12 MB.");byte[] b=new byte[(int)len];try(FileInputStream in=new FileInputStream(f)){int off=0,n;while(off<b.length&&(n=in.read(b,off,b.length-off))>0)off+=n;if(off!=b.length)throw new IllegalStateException("Não foi possível ler um arquivo salvo no aparelho.");}return b;}
     private static String extension(String n){int i=n.lastIndexOf('.');return i>=0?n.substring(i):".jpg";}
     private static String mime(String n){String x=n.toLowerCase(Locale.ROOT);if(x.endsWith(".png"))return "image/png";if(x.endsWith(".webp"))return "image/webp";if(x.endsWith(".heic"))return "image/heic";return "image/jpeg";}
-    private static String pretty(String type){if("programacao.create".equals(type))return "programação";if("programacao.approval".equals(type))return "aprovação da programação";if("ponto.create".equals(type))return "ponto de campo";if("route.sync".equals(type))return "rota GPS";if("vehicle_checklist.create".equals(type))return "checklist do veículo";if("vehicle_checklist.approval".equals(type))return "aprovação do checklist";if("vehicle_checklist.odometer_final".equals(type))return "odômetro final";return "registro de campo";}
+    private static String pretty(String type){if("programacao.create".equals(type))return "programação";if("programacao.approval".equals(type))return "aprovação da programação";if("ponto.create".equals(type))return "ponto de campo";if("route.sync".equals(type))return "rota GPS";if("vehicle_checklist.create".equals(type))return "checklist do veículo";if("vehicle_checklist.approval".equals(type))return "aprovação do checklist";if("vehicle_checklist.odometer_final".equals(type))return "odômetro final";if("estimativa.save".equals(type))return "estimativa de produção";return "registro de campo";}
     private static int parseInt(String s){try{return Integer.parseInt(s);}catch(Exception e){return 0;}}
     private static String safe(String s){return s==null||s.trim().isEmpty()?"falha sem detalhes":s.trim();}
 }
