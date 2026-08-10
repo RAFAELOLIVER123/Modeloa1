@@ -29,7 +29,7 @@ public class AgroBridge {
             o.put("group_id",toInt(db.getSetting("group_id","0")));
             String last=db.getSetting("last_location","");
             if(!last.isEmpty())try{o.put("last_location",new JSONObject(last));}catch(Exception ignored){}
-            o.put("version","2.3.1");
+            o.put("version","2.2.3");
             return o.toString();
         }catch(Exception e){return "{\"online\":false,\"error\":\"Não foi possível ler os dados locais.\"}";}
     }
@@ -39,84 +39,189 @@ public class AgroBridge {
     @JavascriptInterface public boolean isOnline(){return ApiClient.isOnline(activity);}
 
     @JavascriptInterface public void login(String login,String password){
+        final String userLogin=login==null?"":login.trim();
+        final String userPassword=password==null?"":password;
+        callback("agroLoginProgress",messageJson("Validando acesso…"));
         new Thread(()->{
-            Exception apiError=null;
             try{
-                String did=Settings.Secure.getString(activity.getContentResolver(),Settings.Secure.ANDROID_ID);
-                String name=Build.MANUFACTURER+" "+Build.MODEL;
-                try{
-                    JSONObject r=ApiClient.login(login,password,did,name);
-                    db.putSetting("token",r.getString("token"));
-                    db.putSetting("user_json",r.getJSONObject("user").toString());
-                    db.putSetting("groups_json",r.getJSONArray("groups").toString());
-                    db.putSetting("group_id",String.valueOf(r.getInt("group_id")));
-                    String webLogin=r.getJSONObject("user").optString("username",login);
-                    try{CompatClient.login(activity,webLogin,password);}catch(Exception ignored){}
-                    boolean baseOk=false;
-                    try{SyncEngine.refresh(activity,r.getInt("group_id"));baseOk=true;}catch(Exception ignored){}
-                    SyncScheduler.schedule(activity);
-                    callback("agroLoginResult",ok(baseOk?"Acesso realizado. Os dados foram baixados para o aparelho.":"Acesso realizado. Toque em Sincronizar para baixar a base."));
+                if(userLogin.isEmpty()||userPassword.isEmpty()){
+                    callback("agroLoginResult",fail("Informe usuário e senha."));
                     return;
-                }catch(Exception e){apiError=e;}
+                }
+                if(!ApiClient.isOnline(activity)){
+                    callback("agroLoginResult",fail("Sem internet. O primeiro acesso neste aparelho precisa de conexão."));
+                    return;
+                }
 
-                // Se a API móvel estiver desatualizada no servidor, usa o login normal do site.
-                CompatClient.login(activity,login,password);
-                JSONObject u=new JSONObject();
-                u.put("nome",login);
-                u.put("username",login);
-                u.put("perfil_codigo","TECNICO");
-                u.put("perfil_nome","Técnico");
-                JSONArray gs=new JSONArray();
-                gs.put(new JSONObject().put("id",1).put("nome","PAF").put("codigo","PAF").put("principal",1));
-                db.putSetting("token","compat-"+UUID.randomUUID());
-                db.putSetting("user_json",u.toString());
-                db.putSetting("groups_json",gs.toString());
-                db.putSetting("group_id","1");
+                String did=Settings.Secure.getString(activity.getContentResolver(),Settings.Secure.ANDROID_ID);
+                String deviceName=Build.MANUFACTURER+" "+Build.MODEL;
+                JSONObject auth=ApiClient.login(userLogin,userPassword,did,deviceName);
+                String token=auth.getString("token");
+                int gid=auth.optInt("group_id",0);
+                if(gid<=0)gid=1;
+
+                db.putSetting("token",token);
+                if(auth.has("user"))db.putSetting("user_json",auth.getJSONObject("user").toString());
+                if(auth.has("groups"))db.putSetting("groups_json",auth.getJSONArray("groups").toString());
+                db.putSetting("group_id",String.valueOf(gid));
+
+                callback("agroLoginProgress",messageJson("Acesso validado. Baixando dados…"));
+
                 boolean baseOk=false;
+                String baseError="";
                 try{
-                    JSONObject snap=CompatClient.bootstrap(activity,1);
+                    JSONObject snap=ApiClient.bootstrap(token,gid);
                     db.saveSnapshot(snap.toString());
+                    if(snap.has("user"))db.putSetting("user_json",snap.getJSONObject("user").toString());
+                    if(snap.has("groups"))db.putSetting("groups_json",snap.getJSONArray("groups").toString());
+                    db.putSetting("group_id",String.valueOf(snap.optInt("group_id",gid)));
                     baseOk=true;
-                }catch(Exception ignored){}
+                }catch(Exception e){
+                    baseError=message(e);
+                }
+
                 SyncScheduler.schedule(activity);
-                callback("agroLoginResult",ok(baseOk?"Acesso realizado. A base disponível foi salva no aparelho.":"Acesso realizado. Toque em Sincronizar quando estiver com internet."));
-            }catch(Exception compatError){
-                String msg=message(compatError);
-                if((msg==null||msg.isEmpty())&&apiError!=null)msg=message(apiError);
-                callback("agroLoginResult",fail(msg==null||msg.isEmpty()?"Não foi possível conectar. Confira a internet, o usuário e a senha.":msg));
+
+                if(baseOk){
+                    callback("agroLoginResult",ok("Dados baixados. O AgroDominium está pronto para uso."));
+                }else if(!db.getSnapshot().isEmpty()){
+                    callback("agroLoginResult",ok("Acesso validado. A base já salva no aparelho foi mantida."));
+                }else{
+                    db.removeSetting("token");
+                    callback("agroLoginResult",fail("Acesso validado, mas não foi possível baixar a base. "+(baseError.isEmpty()?"Tente novamente com a internet estável.":baseError)));
+                }
+            }catch(Exception e){
+                callback("agroLoginResult",fail(message(e)));
             }
         }).start();
     }
 
-    @JavascriptInterface public void refreshData(int groupId){new Thread(()->{try{SyncEngine.refresh(activity,groupId);callback("agroRefreshResult",ok("Base atualizada e salva no aparelho."));}catch(Exception e){callback("agroRefreshResult",fail(message(e)));}}).start();}
-    @JavascriptInterface public void syncNow(){new Thread(()->{try{JSONObject r=SyncEngine.syncAll(activity,(done,total,msg)->callback("agroSyncProgress",progress(done,total,msg)),true);callback("agroSyncResult",r.toString());}catch(Exception e){callback("agroSyncResult",fail(message(e)));}}).start();}
+    @JavascriptInterface public void refreshData(int groupId){
+        new Thread(()->{
+            try{
+                SyncEngine.refresh(activity,groupId);
+                callback("agroRefreshResult",ok("Base atualizada e salva no aparelho."));
+            }catch(Exception e){
+                callback("agroRefreshResult",fail(message(e)));
+            }
+        }).start();
+    }
+
+    @JavascriptInterface public void syncNow(){
+        new Thread(()->{
+            try{
+                JSONObject r=SyncEngine.syncAll(activity,(done,total,msg)->callback("agroSyncProgress",progress(done,total,msg)),true);
+                callback("agroSyncResult",r.toString());
+            }catch(Exception e){
+                callback("agroSyncResult",fail(message(e)));
+            }
+        }).start();
+    }
     @JavascriptInterface public void scheduleAutoSync(){try{SyncScheduler.schedule(activity);}catch(Exception ignored){}}
 
     @JavascriptInterface public String queueOperation(String type,String payloadJson,String photosJson){
         try{
-            int gid=toInt(db.getSetting("group_id","0"));String uuid=UUID.randomUUID().toString();db.enqueue(type,gid,payloadJson,photosJson,uuid);SyncScheduler.schedule(activity);
+            int gid=toInt(db.getSetting("group_id","0"));
+            String uuid=UUID.randomUUID().toString();
+            db.enqueue(type,gid,payloadJson,photosJson,uuid);
+            SyncScheduler.schedule(activity);
             return new JSONObject().put("ok",true).put("client_uuid",uuid).put("pending",db.pendingCount()).put("message","Salvo na memória do aparelho.").toString();
         }catch(Exception e){return fail(message(e));}
     }
-    @JavascriptInterface public String savePhoto(String dataUrl,String originalName){try{String data=dataUrl;int comma=data.indexOf(',');if(comma>=0)data=data.substring(comma+1);byte[] bytes=Base64.decode(data,Base64.DEFAULT);if(bytes.length>8*1024*1024)throw new IllegalStateException("A foto ficou muito grande. Tente novamente.");File dir=new File(activity.getFilesDir(),"offline_photos");if(!dir.exists()&&!dir.mkdirs())throw new IllegalStateException("Não foi possível criar a pasta local de fotos.");String ext=ext(originalName);File f=new File(dir,UUID.randomUUID()+"."+ext);try(FileOutputStream out=new FileOutputStream(f)){out.write(bytes);}return new JSONObject().put("ok",true).put("path",f.getAbsolutePath()).put("name",f.getName()).toString();}catch(Exception e){return fail(message(e));}}
+
+    @JavascriptInterface public String savePhoto(String dataUrl,String originalName){
+        try{
+            String data=dataUrl;
+            int comma=data.indexOf(',');
+            if(comma>=0)data=data.substring(comma+1);
+            byte[] bytes=Base64.decode(data,Base64.DEFAULT);
+            if(bytes.length>8*1024*1024)throw new IllegalStateException("A foto ficou muito grande. Tente novamente.");
+            File dir=new File(activity.getFilesDir(),"offline_photos");
+            if(!dir.exists()&&!dir.mkdirs())throw new IllegalStateException("Não foi possível criar a pasta local de fotos.");
+            String ext=ext(originalName);
+            File f=new File(dir,UUID.randomUUID()+"."+ext);
+            try(FileOutputStream out=new FileOutputStream(f)){out.write(bytes);}
+            return new JSONObject().put("ok",true).put("path",f.getAbsolutePath()).put("name",f.getName()).toString();
+        }catch(Exception e){return fail(message(e));}
+    }
     @JavascriptInterface public void openCamera(String contextTag){activity.takePhoto(contextTag);}
     @JavascriptInterface public void requestLocation(String contextTag){activity.requestSingleLocation(contextTag);}
 
-    @JavascriptInterface public String startRoute(String programRef,String title){try{if(!activity.hasLocationPermission()){activity.requestLocationPermission();return fail("Permita o acesso à localização e toque em iniciar novamente.");}int gid=toInt(db.getSetting("group_id","0"));String uuid=db.createRoute(gid,programRef,title);Intent i=new Intent(activity,LocationTrackingService.class);i.setAction(LocationTrackingService.ACTION_START);i.putExtra("route_uuid",uuid);androidx.core.content.ContextCompat.startForegroundService(activity,i);return new JSONObject().put("ok",true).put("route_uuid",uuid).put("message","Rota iniciada e sendo gravada no aparelho.").toString();}catch(Exception e){return fail(message(e));}}
-    @JavascriptInterface public String stopRoute(){try{String uuid=db.finishActiveRoute();Intent i=new Intent(activity,LocationTrackingService.class);i.setAction(LocationTrackingService.ACTION_STOP);activity.startService(i);if(uuid==null)return fail("Nenhuma rota ativa.");JSONObject p=new JSONObject();p.put("route_uuid",uuid);int gid=toInt(db.getSetting("group_id","0"));db.enqueue("route.sync",gid,p.toString(),"[]",uuid);SyncScheduler.schedule(activity);return new JSONObject().put("ok",true).put("route_uuid",uuid).put("points",db.routePointCount(uuid)).put("pending",db.pendingCount()).put("message","Rota finalizada e salva no aparelho.").toString();}catch(Exception e){return fail(message(e));}}
+    @JavascriptInterface public String startRoute(String programRef,String title){
+        try{
+            if(!activity.hasLocationPermission()){
+                activity.requestLocationPermission();
+                return fail("Permita o acesso à localização e toque em iniciar novamente.");
+            }
+            int gid=toInt(db.getSetting("group_id","0"));
+            String uuid=db.createRoute(gid,programRef,title);
+            Intent i=new Intent(activity,LocationTrackingService.class);
+            i.setAction(LocationTrackingService.ACTION_START);
+            i.putExtra("route_uuid",uuid);
+            androidx.core.content.ContextCompat.startForegroundService(activity,i);
+            return new JSONObject().put("ok",true).put("route_uuid",uuid).put("message","Rota iniciada e sendo gravada no aparelho.").toString();
+        }catch(Exception e){return fail(message(e));}
+    }
+
+    @JavascriptInterface public String stopRoute(){
+        try{
+            String uuid=db.finishActiveRoute();
+            Intent i=new Intent(activity,LocationTrackingService.class);
+            i.setAction(LocationTrackingService.ACTION_STOP);
+            activity.startService(i);
+            if(uuid==null)return fail("Nenhuma rota ativa.");
+            JSONObject p=new JSONObject();
+            p.put("route_uuid",uuid);
+            int gid=toInt(db.getSetting("group_id","0"));
+            db.enqueue("route.sync",gid,p.toString(),"[]",uuid);
+            SyncScheduler.schedule(activity);
+            return new JSONObject().put("ok",true).put("route_uuid",uuid).put("points",db.routePointCount(uuid)).put("pending",db.pendingCount()).put("message","Rota finalizada e salva no aparelho.").toString();
+        }catch(Exception e){return fail(message(e));}
+    }
+
     @JavascriptInterface public String routeStatus(){try{return db.routeStatus().toString();}catch(Exception e){return "{\"active\":false}";}}
-    @JavascriptInterface public String setGroup(int groupId){try{JSONArray gs=arrayOrEmpty(db.getSetting("groups_json","[]"));boolean permitido=false;for(int i=0;i<gs.length();i++)if(gs.getJSONObject(i).optInt("id")==groupId){permitido=true;break;}if(!permitido)return fail("Você não tem acesso a este grupo de trabalho.");db.putSetting("group_id",String.valueOf(groupId));return ok("Grupo alterado. Sincronize quando estiver com internet.");}catch(Exception e){return fail(message(e));}}
+
+    @JavascriptInterface public String setGroup(int groupId){
+        try{
+            JSONArray gs=arrayOrEmpty(db.getSetting("groups_json","[]"));
+            boolean permitido=false;
+            for(int i=0;i<gs.length();i++)if(gs.getJSONObject(i).optInt("id")==groupId){permitido=true;break;}
+            if(!permitido)return fail("Você não tem acesso a este grupo de trabalho.");
+            db.putSetting("group_id",String.valueOf(groupId));
+            return ok("Grupo alterado. Sincronize quando estiver com internet.");
+        }catch(Exception e){return fail(message(e));}
+    }
+
     @JavascriptInterface public void openOnlinePage(String path){activity.openOnlinePage(path);}
-    @JavascriptInterface public void logout(){String token=db.getSetting("token","");db.logoutKeepData();if(!token.isEmpty()&&!token.startsWith("compat-")&&ApiClient.isOnline(activity))new Thread(()->{try{ApiClient.logout(token);}catch(Exception ignored){}}).start();callback("agroLoggedOut",ok("Sessão encerrada. A base baixada permanece no aparelho."));}
+
+    @JavascriptInterface public void logout(){
+        String token=db.getSetting("token","");
+        db.logoutKeepData();
+        if(!token.isEmpty()&&!token.startsWith("compat-")&&ApiClient.isOnline(activity)){
+            new Thread(()->{try{ApiClient.logout(token);}catch(Exception ignored){}}).start();
+        }
+        callback("agroLoggedOut",ok("Sessão encerrada. A base baixada permanece no aparelho."));
+    }
+
     @JavascriptInterface public String clearLocalData(){try{db.clearEverything();return ok("Dados locais apagados.");}catch(Exception e){return fail(message(e));}}
 
-    private void callback(String fn,String json){activity.runOnUiThread(()->activity.evalJs("window."+fn+" && window."+fn+"("+JSONObject.quote(json)+");"));}
+    private void callback(String fn,String json){
+        activity.runOnUiThread(()->activity.evalJs("window."+fn+" && window."+fn+"("+JSONObject.quote(json)+");"));
+    }
     private String progress(int d,int t,String m){try{return new JSONObject().put("done",d).put("total",t).put("message",m).toString();}catch(Exception e){return "{}";}}
     private static JSONObject jsonOrEmpty(String s){try{return s==null||s.isEmpty()?new JSONObject():new JSONObject(s);}catch(Exception e){return new JSONObject();}}
     private static JSONArray arrayOrEmpty(String s){try{return new JSONArray(s);}catch(Exception e){return new JSONArray();}}
     private static int toInt(String s){try{return Integer.parseInt(s);}catch(Exception e){return 0;}}
     private static String ext(String n){String x=n==null?"":n.toLowerCase(Locale.ROOT);if(x.endsWith(".png"))return"png";if(x.endsWith(".webp"))return"webp";return"jpg";}
-    private static String message(Exception e){String m=e.getMessage();if(m==null||m.isEmpty())return "Ocorreu uma falha no aplicativo.";String n=m.toLowerCase(Locale.ROOT);if(n.contains("unknown column")||n.contains("erro sql"))return "O servidor ainda possui uma estrutura antiga. O aplicativo tentou o modo de compatibilidade.";if(n.contains("unable to resolve host")||n.contains("failed to connect")||n.contains("network is unreachable"))return "Sem conexão com o servidor. Confira a internet e tente novamente.";return m;}
+    private static String message(Exception e){
+        String m=e.getMessage();
+        if(m==null||m.isEmpty())return "Ocorreu uma falha no aplicativo.";
+        String n=m.toLowerCase(Locale.ROOT);
+        if(n.contains("unknown column")||n.contains("erro sql"))return "A estrutura do servidor ainda está desatualizada para o aplicativo.";
+        if(n.contains("unable to resolve host")||n.contains("failed to connect")||n.contains("network is unreachable")||n.contains("timeout")||n.contains("timed out"))return "A conexão com o servidor demorou demais. Confira a internet e tente novamente.";
+        return m;
+    }
+    private static String messageJson(String msg){try{return new JSONObject().put("message",msg).toString();}catch(Exception e){return "{}";}}
     private static String ok(String msg){try{return new JSONObject().put("ok",true).put("message",msg).toString();}catch(Exception e){return "{\"ok\":true}";}}
     private static String fail(String msg){try{return new JSONObject().put("ok",false).put("error",msg).toString();}catch(Exception e){return "{\"ok\":false}";}}
 }
