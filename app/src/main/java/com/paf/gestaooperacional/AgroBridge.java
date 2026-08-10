@@ -41,6 +41,7 @@ public class AgroBridge {
     @JavascriptInterface public String getSnapshot(){String s=db.getSnapshot();return s.isEmpty()?"{}":s;}
     @JavascriptInterface public String getQueue(){try{return db.queueSummary().toString();}catch(Exception e){return "[]";}}
     @JavascriptInterface public String getLocalMapData(){try{return db.localMapData().toString();}catch(Exception e){return "{}";}}
+    @JavascriptInterface public String getEstimateDrafts(){try{return EstimateDraftStore.list(activity).toString();}catch(Exception e){return "[]";}}
     @JavascriptInterface public boolean isOnline(){return ApiClient.isOnline(activity);}
 
     @JavascriptInterface public void login(String login,String password){
@@ -99,7 +100,6 @@ public class AgroBridge {
         }).start();
     }
 
-    // Único comando de sincronização: envia pendências e baixa as bases mais novas.
     @JavascriptInterface public void syncNow(){
         new Thread(()->{
             try{
@@ -120,6 +120,18 @@ public class AgroBridge {
         }catch(Exception e){return fail(message(e));}
     }
 
+    @JavascriptInterface public String saveEstimateDraft(String uuid,String payloadJson,String photosJson){
+        try{
+            String id=EstimateDraftStore.save(activity,uuid,payloadJson,photosJson);
+            return new JSONObject().put("ok",true).put("uuid",id).put("message","Rascunho salvo no aparelho.").toString();
+        }catch(Exception e){return fail(message(e));}
+    }
+
+    @JavascriptInterface public String deleteEstimateDraft(String uuid){
+        try{EstimateDraftStore.delete(activity,uuid);return ok("Rascunho removido.");}
+        catch(Exception e){return fail(message(e));}
+    }
+
     @JavascriptInterface public String savePhoto(String dataUrl,String originalName){
         try{
             String data=dataUrl;int comma=data.indexOf(',');if(comma>=0)data=data.substring(comma+1);
@@ -134,6 +146,27 @@ public class AgroBridge {
 
     @JavascriptInterface public void openCamera(String contextTag){activity.takePhoto(contextTag);}
     @JavascriptInterface public void requestLocation(String contextTag){activity.requestSingleLocation(contextTag);}
+
+    @JavascriptInterface public void producerMedia(int producerId){
+        new Thread(()->{
+            try{callback("agroProducerMediaResult",ProducerMediaClient.list(activity,producerId).toString());}
+            catch(Exception e){callback("agroProducerMediaResult",fail(message(e)));}
+        }).start();
+    }
+
+    @JavascriptInterface public void producerFileData(int fileId){
+        new Thread(()->{
+            try{callback("agroProducerFileResult",ProducerMediaClient.fileData(activity,fileId).toString());}
+            catch(Exception e){callback("agroProducerFileResult",fail(message(e)));}
+        }).start();
+    }
+
+    @JavascriptInterface public void openProducerFile(int fileId){
+        new Thread(()->{
+            try{ProducerMediaClient.openFile(activity,fileId);callback("agroProducerOpenResult",ok("Arquivo aberto."));}
+            catch(Exception e){callback("agroProducerOpenResult",fail(message(e)));}
+        }).start();
+    }
 
     @JavascriptInterface public String startRoute(String programRef,String title){
         try{
