@@ -20,11 +20,19 @@ public class ApiClient {
     public static final String BASE = "https://salmon-woodcock-375027.hostingersite.com/mobile/api.php";
 
     public static boolean isOnline(Context context) {
-        ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if(cm==null)return false;
-        Network n=cm.getActiveNetwork();if(n==null)return false;
-        NetworkCapabilities c=cm.getNetworkCapabilities(n);if(c==null)return false;
-        return c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        try {
+            ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if(cm==null)return false;
+            Network n=cm.getActiveNetwork();
+            if(n==null)return false;
+            NetworkCapabilities c=cm.getNetworkCapabilities(n);
+            if(c==null)return false;
+            // Não exigir NET_CAPABILITY_VALIDATED. Alguns aparelhos/operadoras têm internet
+            // funcional, mas o Android demora a marcar a rede como validada.
+            return c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch(Exception e) {
+            return false;
+        }
     }
 
     public static JSONObject login(String login,String password,String deviceId,String deviceName) throws Exception {
@@ -45,12 +53,12 @@ public class ApiClient {
         try{
             c=(HttpURLConnection)new URL(url).openConnection();
             c.setRequestMethod(method);
-            c.setConnectTimeout(30000);
+            c.setConnectTimeout(20000);
             c.setReadTimeout(180000);
             c.setUseCaches(false);
             c.setRequestProperty("Accept","application/json");
             c.setRequestProperty("Accept-Language","pt-BR,pt;q=0.9");
-            c.setRequestProperty("User-Agent","AgroDominium-Android/2.1");
+            c.setRequestProperty("User-Agent","AgroDominium-Android/2.3.1");
             if(token!=null&&!token.isEmpty())c.setRequestProperty("Authorization","Bearer "+token);
             if(body!=null){
                 byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
