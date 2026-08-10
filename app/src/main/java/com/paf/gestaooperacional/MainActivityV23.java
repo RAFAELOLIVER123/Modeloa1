@@ -7,6 +7,7 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -22,6 +23,7 @@ public class MainActivityV23 extends MainActivity {
         super.onCreate(savedInstanceState);
         SyncScheduler.schedule(this);
         watchNetwork();
+        new Handler(Looper.getMainLooper()).postDelayed(()->notifyNetwork(ApiClient.isOnline(this)),900);
     }
 
     @Override public void requestSingleLocation(String tag) {
@@ -95,12 +97,29 @@ public class MainActivityV23 extends MainActivity {
         }catch(Exception ignored){}
     }
 
+    private void notifyNetwork(boolean online){
+        runOnUiThread(()->evalJs("window.agroNetworkChanged && window.agroNetworkChanged("+online+");"));
+    }
+
     private void watchNetwork(){
         connectivityManager=(ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
         if(connectivityManager==null)return;
         networkCallback=new ConnectivityManager.NetworkCallback(){
             @Override public void onAvailable(Network network){
+                notifyNetwork(true);
                 if(OfflineDb.get(MainActivityV23.this).pendingCount()>0)SyncScheduler.schedule(MainActivityV23.this);
+            }
+            @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps){
+                boolean online=caps!=null && (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        || caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                        || caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                        || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                        || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
+                notifyNetwork(online);
+                if(online && OfflineDb.get(MainActivityV23.this).pendingCount()>0)SyncScheduler.schedule(MainActivityV23.this);
+            }
+            @Override public void onLost(Network network){
+                new Handler(Looper.getMainLooper()).postDelayed(()->notifyNetwork(ApiClient.isOnline(MainActivityV23.this)),500);
             }
         };
         try{connectivityManager.registerDefaultNetworkCallback(networkCallback);}catch(Exception ignored){}
@@ -108,6 +127,7 @@ public class MainActivityV23 extends MainActivity {
 
     @Override protected void onResume(){
         super.onResume();
+        notifyNetwork(ApiClient.isOnline(this));
         if(OfflineDb.get(this).pendingCount()>0)SyncScheduler.schedule(this);
     }
 
