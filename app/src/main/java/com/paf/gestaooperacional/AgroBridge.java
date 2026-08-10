@@ -29,7 +29,7 @@ public class AgroBridge {
             o.put("group_id",toInt(db.getSetting("group_id","0")));
             String last=db.getSetting("last_location","");
             if(!last.isEmpty())try{o.put("last_location",new JSONObject(last));}catch(Exception ignored){}
-            o.put("version","2.2.3");
+            o.put("version","2.2.5");
             return o.toString();
         }catch(Exception e){return "{\"online\":false,\"error\":\"Não foi possível ler os dados locais.\"}";}
     }
@@ -65,30 +65,34 @@ public class AgroBridge {
                 if(auth.has("groups"))db.putSetting("groups_json",auth.getJSONArray("groups").toString());
                 db.putSetting("group_id",String.valueOf(gid));
 
-                callback("agroLoginProgress",messageJson("Acesso validado. Baixando dados…"));
+                callback("agroLoginProgress",messageJson("Acesso validado. Preparando bases…"));
 
-                boolean baseOk=false;
-                String baseError="";
+                // Mantém a mesma estratégia que funcionava na 2.2.0: além do token
+                // da API, abre uma sessão PHP tradicional. Essa sessão permite baixar
+                // produtores, comunidades, atividades, polos, veículos e programações
+                // quando a API móvel não entrega alguma dessas bases.
+                String webLogin=userLogin;
                 try{
-                    JSONObject snap=ApiClient.bootstrap(token,gid);
-                    db.saveSnapshot(snap.toString());
-                    if(snap.has("user"))db.putSetting("user_json",snap.getJSONObject("user").toString());
-                    if(snap.has("groups"))db.putSetting("groups_json",snap.getJSONArray("groups").toString());
-                    db.putSetting("group_id",String.valueOf(snap.optInt("group_id",gid)));
-                    baseOk=true;
-                }catch(Exception e){
-                    baseError=message(e);
-                }
+                    JSONObject u=auth.optJSONObject("user");
+                    if(u!=null&&!u.optString("username","").trim().isEmpty())webLogin=u.optString("username").trim();
+                    CompatClient.login(activity,webLogin,userPassword);
+                }catch(Exception ignored){}
 
-                SyncScheduler.schedule(activity);
+                callback("agroLoginProgress",messageJson("Baixando produtores, agenda e cadastros…"));
 
-                if(baseOk){
-                    callback("agroLoginResult",ok("Dados baixados. O AgroDominium está pronto para uso."));
-                }else if(!db.getSnapshot().isEmpty()){
-                    callback("agroLoginResult",ok("Acesso validado. A base já salva no aparelho foi mantida."));
-                }else{
+                try{
+                    SyncEngine.refresh(activity,gid);
+                    SyncScheduler.schedule(activity);
+                    callback("agroLoginResult",ok("Bases baixadas. O AgroDominium está pronto para uso."));
+                    return;
+                }catch(Exception baseError){
+                    SyncScheduler.schedule(activity);
+                    if(!db.getSnapshot().isEmpty()){
+                        callback("agroLoginResult",ok("Acesso validado. A base já salva no aparelho foi mantida. Toque em sincronizar para atualizar."));
+                        return;
+                    }
                     db.removeSetting("token");
-                    callback("agroLoginResult",fail("Acesso validado, mas não foi possível baixar a base. "+(baseError.isEmpty()?"Tente novamente com a internet estável.":baseError)));
+                    callback("agroLoginResult",fail("Acesso validado, mas não foi possível baixar as bases. "+message(baseError)));
                 }
             }catch(Exception e){
                 callback("agroLoginResult",fail(message(e)));
@@ -99,6 +103,7 @@ public class AgroBridge {
     @JavascriptInterface public void refreshData(int groupId){
         new Thread(()->{
             try{
+                if(!ApiClient.isOnline(activity))throw new IllegalStateException("Sem internet. Continue usando os dados já salvos no aparelho.");
                 SyncEngine.refresh(activity,groupId);
                 callback("agroRefreshResult",ok("Base atualizada e salva no aparelho."));
             }catch(Exception e){
