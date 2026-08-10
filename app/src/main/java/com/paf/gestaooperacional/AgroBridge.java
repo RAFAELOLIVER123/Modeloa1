@@ -24,7 +24,7 @@ public class AgroBridge {
             JSONObject o=db.stats();
             boolean tokenOk=!db.getSetting("token","").isEmpty();
             boolean baseOk=SyncEngine.hasUsefulDataString(db.getSnapshot());
-            boolean compatOk=CompatClient.hasSession(activity);
+            boolean compatOk=CompatBootstrapClient.hasSession(activity);
             o.put("online",ApiClient.isOnline(activity));
             o.put("authenticated",tokenOk && (baseOk || compatOk));
             o.put("user",jsonOrEmpty(db.getSetting("user_json","")));
@@ -33,7 +33,7 @@ public class AgroBridge {
             o.put("base_operacional",baseOk);
             String last=db.getSetting("last_location","");
             if(!last.isEmpty())try{o.put("last_location",new JSONObject(last));}catch(Exception ignored){}
-            o.put("version","2.2.6");
+            o.put("version","2.3.0");
             return o.toString();
         }catch(Exception e){return "{\"online\":false,\"error\":\"Não foi possível ler os dados locais.\"}";}
     }
@@ -69,7 +69,7 @@ public class AgroBridge {
                 JSONObject au=auth.optJSONObject("user");
                 if(au!=null&&!au.optString("username","").trim().isEmpty())webLogin=au.optString("username").trim();
                 String compatError="";
-                try{CompatClient.login(activity,webLogin,userPassword);}catch(Exception e){compatError=message(e);}
+                try{CompatBootstrapClient.login(activity,webLogin,userPassword);}catch(Exception e){compatError=message(e);}
 
                 callback("agroLoginProgress",messageJson("Baixando produtores, atividades e veículos…"));
                 JSONObject fresh;
@@ -146,6 +146,8 @@ public class AgroBridge {
 
     @JavascriptInterface public void openCamera(String contextTag){activity.takePhoto(contextTag);}
     @JavascriptInterface public void requestLocation(String contextTag){activity.requestSingleLocation(contextTag);}
+    @JavascriptInterface public void startAudio(String contextTag){activity.startAudioRecording(contextTag);}
+    @JavascriptInterface public void stopAudio(String contextTag){activity.stopAudioRecording(contextTag);}
 
     @JavascriptInterface public void producerMedia(int producerId){
         new Thread(()->{
