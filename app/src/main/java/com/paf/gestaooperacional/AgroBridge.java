@@ -29,7 +29,7 @@ public class AgroBridge {
             o.put("group_id",toInt(db.getSetting("group_id","0")));
             String last=db.getSetting("last_location","");
             if(!last.isEmpty())try{o.put("last_location",new JSONObject(last));}catch(Exception ignored){}
-            o.put("version","2.3.0");
+            o.put("version","2.3.1");
             return o.toString();
         }catch(Exception e){return "{\"online\":false,\"error\":\"Não foi possível ler os dados locais.\"}";}
     }
@@ -40,27 +40,57 @@ public class AgroBridge {
 
     @JavascriptInterface public void login(String login,String password){
         new Thread(()->{
+            Exception apiError=null;
             try{
-                if(!ApiClient.isOnline(activity))throw new IllegalStateException("A primeira conexão neste aparelho precisa de internet. Depois a base fica salva para uso offline.");
                 String did=Settings.Secure.getString(activity.getContentResolver(),Settings.Secure.ANDROID_ID);
                 String name=Build.MANUFACTURER+" "+Build.MODEL;
-                JSONObject r=ApiClient.login(login,password,did,name);
-                db.putSetting("token",r.getString("token"));
-                db.putSetting("user_json",r.getJSONObject("user").toString());
-                db.putSetting("groups_json",r.getJSONArray("groups").toString());
-                db.putSetting("group_id",String.valueOf(r.getInt("group_id")));
-                String webLogin=r.getJSONObject("user").optString("username",login);
-                try{CompatClient.login(activity,webLogin,password);}catch(Exception ignored){}
+                try{
+                    JSONObject r=ApiClient.login(login,password,did,name);
+                    db.putSetting("token",r.getString("token"));
+                    db.putSetting("user_json",r.getJSONObject("user").toString());
+                    db.putSetting("groups_json",r.getJSONArray("groups").toString());
+                    db.putSetting("group_id",String.valueOf(r.getInt("group_id")));
+                    String webLogin=r.getJSONObject("user").optString("username",login);
+                    try{CompatClient.login(activity,webLogin,password);}catch(Exception ignored){}
+                    boolean baseOk=false;
+                    try{SyncEngine.refresh(activity,r.getInt("group_id"));baseOk=true;}catch(Exception ignored){}
+                    SyncScheduler.schedule(activity);
+                    callback("agroLoginResult",ok(baseOk?"Acesso realizado. Os dados foram baixados para o aparelho.":"Acesso realizado. Toque em Sincronizar para baixar a base."));
+                    return;
+                }catch(Exception e){apiError=e;}
+
+                // Se a API móvel estiver desatualizada no servidor, usa o login normal do site.
+                CompatClient.login(activity,login,password);
+                JSONObject u=new JSONObject();
+                u.put("nome",login);
+                u.put("username",login);
+                u.put("perfil_codigo","TECNICO");
+                u.put("perfil_nome","Técnico");
+                JSONArray gs=new JSONArray();
+                gs.put(new JSONObject().put("id",1).put("nome","PAF").put("codigo","PAF").put("principal",1));
+                db.putSetting("token","compat-"+UUID.randomUUID());
+                db.putSetting("user_json",u.toString());
+                db.putSetting("groups_json",gs.toString());
+                db.putSetting("group_id","1");
                 boolean baseOk=false;
-                try{SyncEngine.refresh(activity,r.getInt("group_id"));baseOk=true;}catch(Exception ignored){}
+                try{
+                    JSONObject snap=CompatClient.bootstrap(activity,1);
+                    db.saveSnapshot(snap.toString());
+                    baseOk=true;
+                }catch(Exception ignored){}
                 SyncScheduler.schedule(activity);
-                callback("agroLoginResult",ok(baseOk?"Acesso realizado. Os dados foram salvos no aparelho.":"Acesso realizado. Toque em Sincronizar para baixar a base disponível."));
-            }catch(Exception e){callback("agroLoginResult",fail(message(e)));}
+                callback("agroLoginResult",ok(baseOk?"Acesso realizado. A base disponível foi salva no aparelho.":"Acesso realizado. Toque em Sincronizar quando estiver com internet."));
+            }catch(Exception compatError){
+                String msg=message(compatError);
+                if((msg==null||msg.isEmpty())&&apiError!=null)msg=message(apiError);
+                callback("agroLoginResult",fail(msg==null||msg.isEmpty()?"Não foi possível conectar. Confira a internet, o usuário e a senha.":msg));
+            }
         }).start();
     }
-    @JavascriptInterface public void refreshData(int groupId){new Thread(()->{try{if(!ApiClient.isOnline(activity))throw new IllegalStateException("Sem internet. Continue usando os dados que já estão salvos neste aparelho.");SyncEngine.refresh(activity,groupId);callback("agroRefreshResult",ok("Base atualizada e salva no aparelho."));}catch(Exception e){callback("agroRefreshResult",fail(message(e)));}}).start();}
-    @JavascriptInterface public void syncNow(){new Thread(()->{try{if(!ApiClient.isOnline(activity))throw new IllegalStateException("Sem internet. Nada foi perdido: os registros continuam na memória do aparelho.");JSONObject r=SyncEngine.syncAll(activity,(done,total,msg)->callback("agroSyncProgress",progress(done,total,msg)),true);callback("agroSyncResult",r.toString());}catch(Exception e){callback("agroSyncResult",fail(message(e)));}}).start();}
-    @JavascriptInterface public void scheduleAutoSync(){SyncScheduler.schedule(activity);}
+
+    @JavascriptInterface public void refreshData(int groupId){new Thread(()->{try{SyncEngine.refresh(activity,groupId);callback("agroRefreshResult",ok("Base atualizada e salva no aparelho."));}catch(Exception e){callback("agroRefreshResult",fail(message(e)));}}).start();}
+    @JavascriptInterface public void syncNow(){new Thread(()->{try{JSONObject r=SyncEngine.syncAll(activity,(done,total,msg)->callback("agroSyncProgress",progress(done,total,msg)),true);callback("agroSyncResult",r.toString());}catch(Exception e){callback("agroSyncResult",fail(message(e)));}}).start();}
+    @JavascriptInterface public void scheduleAutoSync(){try{SyncScheduler.schedule(activity);}catch(Exception ignored){}}
 
     @JavascriptInterface public String queueOperation(String type,String payloadJson,String photosJson){
         try{
@@ -77,7 +107,7 @@ public class AgroBridge {
     @JavascriptInterface public String routeStatus(){try{return db.routeStatus().toString();}catch(Exception e){return "{\"active\":false}";}}
     @JavascriptInterface public String setGroup(int groupId){try{JSONArray gs=arrayOrEmpty(db.getSetting("groups_json","[]"));boolean permitido=false;for(int i=0;i<gs.length();i++)if(gs.getJSONObject(i).optInt("id")==groupId){permitido=true;break;}if(!permitido)return fail("Você não tem acesso a este grupo de trabalho.");db.putSetting("group_id",String.valueOf(groupId));return ok("Grupo alterado. Sincronize quando estiver com internet.");}catch(Exception e){return fail(message(e));}}
     @JavascriptInterface public void openOnlinePage(String path){activity.openOnlinePage(path);}
-    @JavascriptInterface public void logout(){String token=db.getSetting("token","");db.logoutKeepData();if(!token.isEmpty()&&ApiClient.isOnline(activity))new Thread(()->{try{ApiClient.logout(token);}catch(Exception ignored){}}).start();callback("agroLoggedOut",ok("Sessão encerrada. A base baixada permanece no aparelho."));}
+    @JavascriptInterface public void logout(){String token=db.getSetting("token","");db.logoutKeepData();if(!token.isEmpty()&&!token.startsWith("compat-")&&ApiClient.isOnline(activity))new Thread(()->{try{ApiClient.logout(token);}catch(Exception ignored){}}).start();callback("agroLoggedOut",ok("Sessão encerrada. A base baixada permanece no aparelho."));}
     @JavascriptInterface public String clearLocalData(){try{db.clearEverything();return ok("Dados locais apagados.");}catch(Exception e){return fail(message(e));}}
 
     private void callback(String fn,String json){activity.runOnUiThread(()->activity.evalJs("window."+fn+" && window."+fn+"("+JSONObject.quote(json)+");"));}
@@ -86,7 +116,7 @@ public class AgroBridge {
     private static JSONArray arrayOrEmpty(String s){try{return new JSONArray(s);}catch(Exception e){return new JSONArray();}}
     private static int toInt(String s){try{return Integer.parseInt(s);}catch(Exception e){return 0;}}
     private static String ext(String n){String x=n==null?"":n.toLowerCase(Locale.ROOT);if(x.endsWith(".png"))return"png";if(x.endsWith(".webp"))return"webp";return"jpg";}
-    private static String message(Exception e){String m=e.getMessage();if(m==null||m.isEmpty())return "Ocorreu uma falha no aplicativo.";String n=m.toLowerCase(Locale.ROOT);if(n.contains("unknown column")||n.contains("erro sql"))return "A base do servidor está com estrutura antiga. O modo de compatibilidade será usado quando possível.";return m;}
+    private static String message(Exception e){String m=e.getMessage();if(m==null||m.isEmpty())return "Ocorreu uma falha no aplicativo.";String n=m.toLowerCase(Locale.ROOT);if(n.contains("unknown column")||n.contains("erro sql"))return "O servidor ainda possui uma estrutura antiga. O aplicativo tentou o modo de compatibilidade.";if(n.contains("unable to resolve host")||n.contains("failed to connect")||n.contains("network is unreachable"))return "Sem conexão com o servidor. Confira a internet e tente novamente.";return m;}
     private static String ok(String msg){try{return new JSONObject().put("ok",true).put("message",msg).toString();}catch(Exception e){return "{\"ok\":true}";}}
     private static String fail(String msg){try{return new JSONObject().put("ok",false).put("error",msg).toString();}catch(Exception e){return "{\"ok\":false}";}}
 }
