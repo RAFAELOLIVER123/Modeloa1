@@ -2,4 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="camera" path="camera/" />
     <cache-path name="producer_media" path="producer_media/" />
+    <files-path name="offline_photos" path="offline_photos/" />
 </paths>
