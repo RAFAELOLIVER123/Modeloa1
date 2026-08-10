@@ -4,10 +4,12 @@ import android.content.Context;
 import android.util.Base64;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.util.Iterator;
 import java.util.Locale;
 
 public class SyncEngine {
@@ -20,50 +22,18 @@ public class SyncEngine {
         int gid=requestedGroup>0?requestedGroup:parseInt(db.getSetting("group_id","0"));
         if(gid<=0)gid=1;
 
-        JSONObject apiSnapshot=null;
-        Exception apiError=null;
-        try{
-            apiSnapshot=ApiClient.bootstrap(token,gid);
-        }catch(Exception e){
-            apiError=e;
-        }
-
-        JSONObject j=apiSnapshot;
-
-        // A lógica estável da 2.2.0 mantinha uma sessão web paralela. Ela é usada
-        // quando a API móvel falha ou responde sem as listas necessárias para os formulários.
+        JSONObject api=null,compat=null;
+        Exception apiError=null,compatError=null;
+        try{api=ApiClient.bootstrap(token,gid);}catch(Exception e){apiError=e;}
         if(CompatClient.hasSession(ctx)){
-            boolean precisaCompat = apiSnapshot==null || !hasUsefulBase(apiSnapshot);
-            if(precisaCompat){
-                try{
-                    JSONObject compat=CompatClient.bootstrap(ctx,gid);
-                    if(apiSnapshot==null){
-                        j=compat;
-                    }else{
-                        j=mergeMissingBase(apiSnapshot,compat);
-                    }
-                }catch(Exception compatError){
-                    if(apiSnapshot==null){
-                        if(apiError!=null)throw apiError;
-                        throw compatError;
-                    }
-                }
-            }else{
-                // Mesmo com a API funcional, completa listas vazias com a base web.
-                try{
-                    JSONObject compat=CompatClient.bootstrap(ctx,gid);
-                    j=mergeMissingBase(apiSnapshot,compat);
-                }catch(Exception ignored){}
-            }
+            try{compat=CompatClient.bootstrap(ctx,gid);}catch(Exception e){compatError=e;}
         }
 
-        if(j==null){
-            if(apiError!=null)throw apiError;
-            throw new IllegalStateException("Não foi possível baixar a base do servidor.");
-        }
-
-        if(!hasUsefulBase(j)){
-            throw new IllegalStateException("O servidor respondeu, mas não trouxe as bases de atividades, comunidades, polos, produtores ou veículos.");
+        JSONObject j=mergeSnapshots(api,compat,gid);
+        if(!hasUsefulData(j)){
+            String a=apiError==null?"API sem dados":safe(apiError.getMessage());
+            String c=compatError==null?(CompatClient.hasSession(ctx)?"sessão web sem dados":"sessão web não disponível"):safe(compatError.getMessage());
+            throw new IllegalStateException("Não foi possível montar a base do aplicativo. "+a+" · "+c);
         }
 
         db.saveSnapshot(j.toString());
@@ -73,49 +43,68 @@ public class SyncEngine {
         return j;
     }
 
-    private static boolean hasUsefulBase(JSONObject root){
-        if(root==null)return false;
-        JSONObject data=root.optJSONObject("data");
-        if(data==null)return false;
-        String[] keys={"atividades","comunidades","polos","produtores","veiculos","programacoes","plantios"};
-        for(String key:keys){
-            JSONArray a=data.optJSONArray(key);
-            if(a!=null&&a.length()>0)return true;
-        }
-        return false;
+    public static boolean hasUsefulDataString(String json){
+        if(json==null||json.trim().isEmpty())return false;
+        try{return hasUsefulData(new JSONObject(json));}catch(Exception e){return false;}
     }
 
-    private static JSONObject mergeMissingBase(JSONObject primary,JSONObject fallback){
-        try{
-            JSONObject out=new JSONObject(primary.toString());
-            JSONObject pd=out.optJSONObject("data");
-            JSONObject fd=fallback==null?null:fallback.optJSONObject("data");
-            if(pd==null){
-                pd=new JSONObject();
-                out.put("data",pd);
+    public static boolean hasUsefulData(JSONObject j){
+        if(j==null)return false;
+        JSONObject d=j.optJSONObject("data");if(d==null)return false;
+        int total=0,core=0;
+        String[] keys={"produtores","plantios","comunidades","atividades","polos","veiculos","programacoes","equipe","pontos"};
+        for(String k:keys){
+            JSONArray a=d.optJSONArray(k);
+            if(a!=null){
+                total+=a.length();
+                if(a.length()>0&&("produtores".equals(k)||"comunidades".equals(k)||"atividades".equals(k)||"veiculos".equals(k)||"programacoes".equals(k)))core++;
             }
-            if(fd!=null){
-                String[] keys={
-                    "polos","comunidades","atividades","veiculos","checklist_veiculo_itens",
-                    "programacoes","aprovacoes_programacoes","produtores","plantios","pontos",
-                    "equipe","sessoes","localizacoes","checklists_veiculo","checklists_pendentes",
-                    "movimentacoes_veiculos"
-                };
-                for(String key:keys){
-                    JSONArray atual=pd.optJSONArray(key);
-                    JSONArray reserva=fd.optJSONArray(key);
-                    if((atual==null||atual.length()==0)&&reserva!=null&&reserva.length()>0){
-                        pd.put(key,reserva);
-                    }
-                }
-            }
-            if((!out.has("user")||out.optJSONObject("user")==null)&&fallback!=null&&fallback.has("user"))out.put("user",fallback.getJSONObject("user"));
-            if((!out.has("groups")||out.optJSONArray("groups")==null)&&fallback!=null&&fallback.has("groups"))out.put("groups",fallback.getJSONArray("groups"));
-            if(out.optInt("group_id",0)<=0&&fallback!=null)out.put("group_id",fallback.optInt("group_id",1));
-            return out;
-        }catch(Exception e){
-            return primary!=null?primary:fallback;
         }
+        return total>0 && core>0;
+    }
+
+    public static JSONObject counts(JSONObject j){
+        JSONObject out=new JSONObject();
+        try{
+            JSONObject d=j==null?null:j.optJSONObject("data");if(d==null)return out;
+            String[] keys={"produtores","plantios","comunidades","atividades","polos","veiculos","programacoes","pontos","equipe","sessoes","localizacoes","checklist_veiculo_itens","aprovacoes_programacoes","checklists_pendentes"};
+            for(String k:keys){JSONArray a=d.optJSONArray(k);out.put(k,a==null?0:a.length());}
+        }catch(Exception ignored){}
+        return out;
+    }
+
+    private static JSONObject mergeSnapshots(JSONObject api,JSONObject compat,int gid) throws JSONException {
+        if(api==null&&compat==null)return null;
+        JSONObject out=new JSONObject();
+        JSONObject base=api!=null?api:compat;
+        Iterator<String> top=base.keys();
+        while(top.hasNext()){String k=top.next();if(!"data".equals(k))out.put(k,base.opt(k));}
+        out.put("ok",true);out.put("group_id",gid);
+        if((!out.has("user")||out.optJSONObject("user")==null)&&compat!=null&&compat.has("user"))out.put("user",compat.opt("user"));
+        if((!out.has("groups")||out.optJSONArray("groups")==null)&&compat!=null&&compat.has("groups"))out.put("groups",compat.opt("groups"));
+
+        JSONObject da=api==null?null:api.optJSONObject("data");
+        JSONObject dc=compat==null?null:compat.optJSONObject("data");
+        JSONObject d=new JSONObject();
+        java.util.LinkedHashSet<String> keys=new java.util.LinkedHashSet<>();
+        if(da!=null){Iterator<String> it=da.keys();while(it.hasNext())keys.add(it.next());}
+        if(dc!=null){Iterator<String> it=dc.keys();while(it.hasNext())keys.add(it.next());}
+        String[] expected={"polos","comunidades","atividades","veiculos","checklist_veiculo_itens","programacoes","aprovacoes_programacoes","produtores","plantios","pontos","equipe","sessoes","localizacoes","checklists_veiculo","checklists_pendentes","movimentacoes_veiculos"};
+        for(String k:expected)keys.add(k);
+
+        for(String k:keys){
+            Object a=da==null?null:da.opt(k),c=dc==null?null:dc.opt(k);
+            if(a instanceof JSONArray || c instanceof JSONArray){
+                JSONArray aa=a instanceof JSONArray?(JSONArray)a:new JSONArray();
+                JSONArray cc=c instanceof JSONArray?(JSONArray)c:new JSONArray();
+                d.put(k,aa.length()>=cc.length()?aa:cc);
+            }else if(a!=null&&a!=JSONObject.NULL)d.put(k,a);
+            else if(c!=null&&c!=JSONObject.NULL)d.put(k,c);
+            else d.put(k,new JSONArray());
+        }
+        out.put("data",d);
+        out.put("modo_compatibilidade",compat!=null);
+        return out;
     }
 
     public static JSONObject syncAll(Context ctx,Progress progress,boolean refreshAfter) throws Exception {
@@ -123,23 +112,53 @@ public class SyncEngine {
         if(token.isEmpty())throw new IllegalStateException("Sessão do aplicativo não configurada. Faça login novamente.");
         if(!ApiClient.isOnline(ctx))throw new IllegalStateException("Sem internet. Os dados continuam salvos no aparelho.");
         int totalInicial=db.pendingCount(),done=0,failed=0,processed=0;final int LIMITE_SEGURANCA=5000;
-        while(processed<LIMITE_SEGURANCA){JSONArray pending=db.pending(300);if(pending.length()==0)break;boolean houveSucesso=false;
+        while(processed<LIMITE_SEGURANCA){
+            JSONArray pending=db.pending(300);if(pending.length()==0)break;boolean houveSucesso=false;
             for(int i=0;i<pending.length()&&processed<LIMITE_SEGURANCA;i++){
                 JSONObject q=pending.getJSONObject(i);long id=q.getLong("id");db.markSending(id);String type=q.getString("type");processed++;
                 try{
-                    JSONObject payload=new JSONObject(q.optString("payload_json","{}"));if("route.sync".equals(type)){String ru=payload.optString("route_uuid",q.getString("client_uuid"));payload=db.buildRoutePayload(ru);}JSONObject response;
+                    JSONObject payload=new JSONObject(q.optString("payload_json","{}"));
+                    if("route.sync".equals(type)){String ru=payload.optString("route_uuid",q.getString("client_uuid"));payload=db.buildRoutePayload(ru);}
+                    JSONObject response;
                     try{
-                        JSONObject op=new JSONObject();op.put("client_uuid",q.getString("client_uuid"));op.put("type",type);op.put("group_id",q.optInt("group_id",parseInt(db.getSetting("group_id","0"))));JSONObject apiPayload=new JSONObject(payload.toString());
+                        JSONObject op=new JSONObject();op.put("client_uuid",q.getString("client_uuid"));op.put("type",type);op.put("group_id",q.optInt("group_id",parseInt(db.getSetting("group_id","0"))));
+                        JSONObject apiPayload=new JSONObject(payload.toString());
                         if("vehicle_checklist.create".equals(type)){String sigPath=apiPayload.optString("assinatura_path_local","");if(!sigPath.isEmpty()){apiPayload.remove("assinatura_path_local");apiPayload.put("assinatura_tecnico",encodeOneFile(sigPath,"assinatura-tecnico"));}}
                         op.put("payload",apiPayload);op.put("photos",encodePhotos(q.optString("photos_json","[]")));response=ApiClient.sync(token,op);
                     }catch(Exception apiError){if(!CompatClient.hasSession(ctx))throw apiError;response=CompatClient.syncOperation(ctx,type,payload,q.optString("photos_json","[]"));}
-                    db.markSynced(id,response.toString());if("route.sync".equals(type))db.markRouteSynced(payload.optString("route_uuid",q.getString("client_uuid")));done++;houveSucesso=true;if(progress!=null)progress.onProgress(done,Math.max(totalInicial,done+db.pendingCount()),"Enviado: "+pretty(type));
-                }catch(Exception e){failed++;String msg=e.getMessage()==null?e.toString():e.getMessage();db.markFailed(id,msg);if(progress!=null)progress.onProgress(done,Math.max(totalInicial,done+db.pendingCount()),"Falha em "+pretty(type)+": "+msg);if(e instanceof ApiClient.ApiException&&((ApiClient.ApiException)e).status==401)throw e;}
+                    db.markSynced(id,response.toString());
+                    if("route.sync".equals(type))db.markRouteSynced(payload.optString("route_uuid",q.getString("client_uuid")));
+                    done++;houveSucesso=true;
+                    if(progress!=null)progress.onProgress(done,Math.max(totalInicial,done+db.pendingCount()),"Enviado: "+pretty(type));
+                }catch(Exception e){
+                    failed++;String msg=e.getMessage()==null?e.toString():e.getMessage();db.markFailed(id,msg);
+                    if(progress!=null)progress.onProgress(done,Math.max(totalInicial,done+db.pendingCount()),"Falha em "+pretty(type)+": "+msg);
+                    if(e instanceof ApiClient.ApiException&&((ApiClient.ApiException)e).status==401)throw e;
+                }
             }
             if(!houveSucesso)break;
         }
-        db.purgeSynced();JSONObject fresh=null;if(refreshAfter&&db.pendingCount()==0){try{fresh=refresh(ctx,parseInt(db.getSetting("group_id","0")));}catch(Exception ignored){}}
-        JSONObject out=new JSONObject();out.put("ok",db.pendingCount()==0);out.put("sincronizados",done);out.put("falhas",failed);out.put("pendentes",db.pendingCount());out.put("synced",done);out.put("failed",failed);out.put("pending",db.pendingCount());if(processed>=LIMITE_SEGURANCA)out.put("aviso","A fila é muito grande. Sincronize novamente para continuar.");if(fresh!=null)out.put("base_atualizada",true);return out;
+        db.purgeSynced();
+
+        JSONObject fresh=null;String baseError="";
+        if(refreshAfter){
+            try{fresh=refresh(ctx,parseInt(db.getSetting("group_id","0")));}
+            catch(Exception e){baseError=e.getMessage()==null?"Não foi possível atualizar a base.":e.getMessage();}
+        }
+
+        JSONObject out=new JSONObject();
+        boolean baseOk=!refreshAfter || fresh!=null;
+        out.put("ok",baseOk && failed==0);
+        out.put("sincronizados",done);out.put("falhas",failed);out.put("pendentes",db.pendingCount());
+        out.put("synced",done);out.put("failed",failed);out.put("pending",db.pendingCount());
+        if(processed>=LIMITE_SEGURANCA)out.put("aviso","A fila é muito grande. Sincronize novamente para continuar.");
+        if(fresh!=null){out.put("base_atualizada",true);out.put("contagens",counts(fresh));}
+        if(!baseError.isEmpty())out.put("erro_base",baseError);
+        if(fresh!=null&&failed>0)out.put("message","A base foi atualizada, mas alguns envios continuam pendentes.");
+        else if(fresh!=null)out.put("message","Sincronização concluída. Dados enviados e bases atualizadas.");
+        else if(done>0)out.put("message","Coletas enviadas, mas a base não pôde ser atualizada.");
+        else if(!baseError.isEmpty())out.put("error",baseError);
+        return out;
     }
 
     private static JSONObject encodeOneFile(String path,String displayName) throws Exception{File f=new File(path);if(!f.isFile())throw new IllegalStateException("A assinatura salva no aparelho não foi encontrada.");byte[] b=readFile(f);JSONObject p=new JSONObject();p.put("name",displayName+extension(f.getName()));p.put("mime",mime(f.getName()));p.put("data",Base64.encodeToString(b,Base64.NO_WRAP));return p;}
@@ -149,4 +168,5 @@ public class SyncEngine {
     private static String mime(String n){String x=n.toLowerCase(Locale.ROOT);if(x.endsWith(".png"))return "image/png";if(x.endsWith(".webp"))return "image/webp";if(x.endsWith(".heic"))return "image/heic";return "image/jpeg";}
     private static String pretty(String type){if("programacao.create".equals(type))return "programação";if("programacao.approval".equals(type))return "aprovação da programação";if("ponto.create".equals(type))return "ponto de campo";if("route.sync".equals(type))return "rota GPS";if("vehicle_checklist.create".equals(type))return "checklist do veículo";if("vehicle_checklist.approval".equals(type))return "aprovação do checklist";if("vehicle_checklist.odometer_final".equals(type))return "odômetro final";return "registro de campo";}
     private static int parseInt(String s){try{return Integer.parseInt(s);}catch(Exception e){return 0;}}
+    private static String safe(String s){return s==null||s.trim().isEmpty()?"falha sem detalhes":s.trim();}
 }
