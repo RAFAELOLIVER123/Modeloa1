@@ -19,8 +19,7 @@ jobs:
         run: |
           node --check app/src/main/assets/app/app.js
           node --check app/src/main/assets/app/fix-v226.js
-          node --check app/src/main/assets/app/fix-v227.js
-          node --check app/src/main/assets/app/fix-v227b.js
+          node --check app/src/main/assets/app/fix-v228.js
 
       - name: Java 17
         uses: actions/setup-java@v4
@@ -45,11 +44,11 @@ jobs:
         run: gradle --no-daemon assembleRelease
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v2.2.7.apk
+        run: cp app/build/outputs/apk/release/app-release.apk AgroDominium-v2.2.8.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AgroDominium-v2.2.7-APK
-          path: AgroDominium-v2.2.7.apk
+          name: AgroDominium-v2.2.8-APK
+          path: AgroDominium-v2.2.8.apk
           if-no-files-found: error
