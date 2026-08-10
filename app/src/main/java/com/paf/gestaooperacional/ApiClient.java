@@ -4,6 +4,7 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkInfo;
 
 import org.json.JSONObject;
 
@@ -23,11 +24,21 @@ public class ApiClient {
         try {
             ConnectivityManager cm=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
             if(cm==null)return false;
+
             Network n=cm.getActiveNetwork();
-            if(n==null)return false;
-            NetworkCapabilities c=cm.getNetworkCapabilities(n);
-            if(c==null)return false;
-            return c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            if(n!=null){
+                NetworkCapabilities c=cm.getNetworkCapabilities(n);
+                if(c!=null){
+                    if(c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))return true;
+                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))return true;
+                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))return true;
+                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return true;
+                    if(c.hasTransport(NetworkCapabilities.TRANSPORT_VPN))return true;
+                }
+            }
+
+            NetworkInfo info=cm.getActiveNetworkInfo();
+            return info!=null && info.isConnected();
         } catch(Exception e) {
             return false;
         }
@@ -56,7 +67,7 @@ public class ApiClient {
             c.setUseCaches(false);
             c.setRequestProperty("Accept","application/json");
             c.setRequestProperty("Accept-Language","pt-BR,pt;q=0.9");
-            c.setRequestProperty("User-Agent","AgroDominium-Android/2.2.1");
+            c.setRequestProperty("User-Agent","AgroDominium-Android/2.2.2");
             if(token!=null&&!token.isEmpty())c.setRequestProperty("Authorization","Bearer "+token);
             if(body!=null){
                 byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
