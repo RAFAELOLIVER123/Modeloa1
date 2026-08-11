@@ -70,7 +70,7 @@ public class ApiClient {
             c.setUseCaches(false);
             c.setRequestProperty("Accept","application/json");
             c.setRequestProperty("Accept-Language","pt-BR,pt;q=0.9");
-            c.setRequestProperty("User-Agent","AgroDominium-Android/2.2.3");
+            c.setRequestProperty("User-Agent","AgroDominium-Android/2.4.1");
             if(token!=null&&!token.isEmpty())c.setRequestProperty("Authorization","Bearer "+token);
             if(body!=null){
                 byte[] bytes=body.getBytes(StandardCharsets.UTF_8);
