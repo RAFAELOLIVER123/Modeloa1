@@ -14,9 +14,27 @@ window.agroCameraResult=function(tag,payload){if(tag==='maintenance231'){const r
 
 window.saveMaintenance231=function(){
   const vid=+document.getElementById('mVeh231')?.value||0,v=(D.veiculos||[]).find(x=>+x.id===vid)||{},checked=[...document.querySelectorAll('.mItem231:checked')],km=Number(document.getElementById('mKm231')?.value);
-  if(!vid)return toast('Selecione o veículo.','warn');if(!document.getElementById('mDate231')?.value)return toast('Informe a data da parada.','warn');if(!Number.isFinite(km)||km<0)return toast('Informe o KM do veículo.','warn');if(!checked.length)return toast('Marque pelo menos um item de manutenção.','warn');
-  const p={veiculo_id:vid,moto_id:vid,placa:v.placa||'',veiculo_tipo:v.tipo||'',veiculo_modelo:v.modelo||'',data_parada:document.getElementById('mDate231').value,km_parada:km,prioridade:document.getElementById('mPri231')?.value||'NORMAL',previsao_retorno:document.getElementById('mReturn231')?.value||null,moto_imobilizada:document.getElementById('mStop231')?.checked?1:0,itens:checked.map(x=>({id:+x.value,nome:x.dataset.name,categoria:x.dataset.cat})),fornecedor:document.getElementById('mShop231')?.value.trim()||'',telefone_oficina:document.getElementById('mPhone231')?.value.trim()||'',numero_orcamento:document.getElementById('mBudgetNo231')?.value.trim()||'',valor_orcamento:+document.getElementById('mBudget231')?.value||null,solicitacao:document.getElementById('mDesc231')?.value.trim()||'',status:'AGUARDANDO_APROVACAO',created_at:now()};
-  const files=M233.photos.map(x=>({path:x.path,categoria:'MANUTENCAO'});)
+  if(!vid)return toast('Selecione o veículo.','warn');
+  if(!document.getElementById('mDate231')?.value)return toast('Informe a data da parada.','warn');
+  if(!Number.isFinite(km)||km<0)return toast('Informe o KM do veículo.','warn');
+  if(!checked.length)return toast('Marque pelo menos um item de manutenção.','warn');
+  const p={
+    veiculo_id:vid,moto_id:vid,placa:v.placa||'',veiculo_tipo:v.tipo||'',veiculo_modelo:v.modelo||'',
+    data_parada:document.getElementById('mDate231').value,km_parada:km,
+    prioridade:document.getElementById('mPri231')?.value||'NORMAL',
+    previsao_retorno:document.getElementById('mReturn231')?.value||null,
+    moto_imobilizada:document.getElementById('mStop231')?.checked?1:0,
+    itens:checked.map(x=>({id:+x.value,nome:x.dataset.name,categoria:x.dataset.cat})),
+    fornecedor:document.getElementById('mShop231')?.value.trim()||'',
+    telefone_oficina:document.getElementById('mPhone231')?.value.trim()||'',
+    numero_orcamento:document.getElementById('mBudgetNo231')?.value.trim()||'',
+    valor_orcamento:+document.getElementById('mBudget231')?.value||null,
+    solicitacao:document.getElementById('mDesc231')?.value.trim()||'',
+    status:'AGUARDANDO_APROVACAO',created_at:now()
+  };
+  const files=M233.photos.map(x=>({path:x.path,categoria:'MANUTENCAO'}));
+  const r=result(native('queueOperation','maintenance.request',JSON.stringify(p),JSON.stringify(files)),'Solicitação de manutenção salva no aparelho.');
+  if(r.ok){load();native('scheduleAutoSync');setTimeout(()=>window.maintenance231&&maintenance231(),180)}
 };
 
 })();
