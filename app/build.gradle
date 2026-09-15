@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.damacub.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.damacub.app'
+        minSdk 23
+        targetSdk 35
+        versionCode 4
+        versionName '4.0'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        debug {
+            // ID oficial de teste do Google. Nunca use anúncios reais durante desenvolvimento.
+            buildConfigField 'String', 'REWARDED_AD_UNIT_ID', '"ca-app-pub-3940256099942544/5224354917"'
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            // Bloco recompensado real do DamaCub.
+            buildConfigField 'String', 'REWARDED_AD_UNIT_ID', '"ca-app-pub-8790498111791129/6529171280"'
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-ads:25.4.0'
+    implementation 'com.google.android.ump:user-messaging-platform:4.0.0'
+}
