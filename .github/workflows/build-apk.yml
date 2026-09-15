@@ -21,7 +21,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           p = Path('app/src/main/assets/game.html')
           s = p.read_text()
@@ -40,17 +39,16 @@ jobs:
           if 'DamaCub 4.1: GPU-composited' not in s:
               s = s.replace('</style>', css + '\n</style>', 1)
 
-          def line_replace(name, replacement):
+          def replace_between(start_token, end_token, replacement):
               global s
-              pattern = r'^function ' + re.escape(name) + r'\([^\n]*$'
-              s, n = re.subn(pattern, replacement, s, count=1, flags=re.M)
-              if n != 1:
-                  raise SystemExit(f'Nao foi possivel substituir {name}')
+              a = s.index(start_token)
+              b = s.index(end_token, a)
+              s = s[:a] + replacement + '\n' + s[b:]
 
-          line_replace('legal', "function legal(b,s){var moves=[],r,c,p,ds,js,i,j,rr,cc;for(r=0;r<8;r++)for(c=0;c<8;c++){p=b[r][c];if(side(p)!==s)continue;js=jumpsFrom(b,r,c,p);for(i=0;i<js.length;i++){j=js[i];moves.push({from:{r:r,c:c},to:{r:j.r,c:j.c},path:[{r:j.r,c:j.c}],caps:[j.cap]})}ds=moveDirs(p);for(i=0;i<ds.length;i++){rr=r+ds[i][0];cc=c+ds[i][1];if(inside(rr,cc)&&b[rr][cc]===E)moves.push({from:{r:r,c:c},to:{r:rr,c:cc},path:[{r:rr,c:cc}],caps:[]})}}return moves}")
-          line_replace('setPos', "function setPos(node,r,c){node.style.transform='translate3d('+(c*100)+'%,'+(r*100)+'%,0)'}")
-          line_replace('selectPiece', "function selectPiece(r,c,lm){var list=lm.filter(function(m){return m.from.r===r&&m.from.c===c});if(!list.length){toast('Sem jogada para esta peça');playError();return}selected={r:r,c:c};targets=list;playSelect();markLegal()}")
-          line_replace('animateMove', "function animateMove(m,done){var p=board[m.from.r][m.from.c],node=pieceMap[key(m.from.r,m.from.c)],i=0,curR=m.from.r,curC=m.from.c;if(!node){done();return}delete pieceMap[key(curR,curC)];node.classList.remove('selected-piece');clearMarks();function next(){if(i>=m.path.length){var end=m.path[m.path.length-1];pieceMap[key(end.r,end.c)]=node;promoteNode(node,p,end);done();return}var dest=m.path[i],cap=m.caps[i],victim=cap?pieceMap[key(cap[0],cap[1])]:null,dur=cap?470:290;if(cap){node.classList.add('jumping');if(victim){setTimeout(function(){if(victim&&victim.parentNode)victim.classList.add('under-jump')},Math.round(dur*.42))}}setPos(node,dest.r,dest.c);setTimeout(function(){node.classList.remove('jumping');if(cap&&victim){victim.classList.remove('under-jump');playCapture();victim.classList.add('captured');delete pieceMap[key(cap[0],cap[1])];setTimeout(function(){if(victim.parentNode)victim.parentNode.removeChild(victim)},150)}else playMove();curR=dest.r;curC=dest.c;i++;setTimeout(next,cap?170:45)},dur)}next()}")
+          replace_between('function legal(', 'function applySim(', "function legal(b,s){var moves=[],r,c,p,ds,js,i,j,rr,cc;for(r=0;r<8;r++)for(c=0;c<8;c++){p=b[r][c];if(side(p)!==s)continue;js=jumpsFrom(b,r,c,p);for(i=0;i<js.length;i++){j=js[i];moves.push({from:{r:r,c:c},to:{r:j.r,c:j.c},path:[{r:j.r,c:j.c}],caps:[j.cap]})}ds=moveDirs(p);for(i=0;i<ds.length;i++){rr=r+ds[i][0];cc=c+ds[i][1];if(inside(rr,cc)&&b[rr][cc]===E)moves.push({from:{r:r,c:c},to:{r:rr,c:cc},path:[{r:rr,c:cc}],caps:[]})}}return moves}")
+          replace_between('function setPos(', 'function rebuildPieces(', "function setPos(node,r,c){node.style.transform='translate3d('+(c*100)+'%,'+(r*100)+'%,0)'}")
+          replace_between('function selectPiece(', 'function count(', "function selectPiece(r,c,lm){var list=lm.filter(function(m){return m.from.r===r&&m.from.c===c});if(!list.length){toast('Sem jogada para esta peça');playError();return}selected={r:r,c:c};targets=list;playSelect();markLegal()}")
+          replace_between('function animateMove(', 'function commitMove(', "function animateMove(m,done){var p=board[m.from.r][m.from.c],node=pieceMap[key(m.from.r,m.from.c)],i=0,curR=m.from.r,curC=m.from.c;if(!node){done();return}delete pieceMap[key(curR,curC)];node.classList.remove('selected-piece');clearMarks();function next(){if(i>=m.path.length){var end=m.path[m.path.length-1];pieceMap[key(end.r,end.c)]=node;promoteNode(node,p,end);done();return}var dest=m.path[i],cap=m.caps[i],victim=cap?pieceMap[key(cap[0],cap[1])]:null,dur=cap?470:290;if(cap){node.classList.add('jumping');if(victim){setTimeout(function(){if(victim&&victim.parentNode)victim.classList.add('under-jump')},Math.round(dur*.42))}}setPos(node,dest.r,dest.c);setTimeout(function(){node.classList.remove('jumping');if(cap&&victim){victim.classList.remove('under-jump');playCapture();victim.classList.add('captured');delete pieceMap[key(cap[0],cap[1])];setTimeout(function(){if(victim.parentNode)victim.parentNode.removeChild(victim)},150)}else playMove();curR=dest.r;curC=dest.c;i++;setTimeout(next,cap?170:45)},dur)}next()}")
 
           p.write_text(s)
 
@@ -58,10 +56,12 @@ jobs:
           gs = g.read_text().replace('versionCode 4', 'versionCode 5').replace("versionName '4.0'", "versionName '4.1'")
           g.write_text(gs)
 
-          # Static sanity checks: optional captures + transform-only movement.
-          assert "return caps" not in re.search(r'^function legal.*$', s, re.M).group(0)
-          assert "translate3d" in re.search(r'^function setPos.*$', s, re.M).group(0)
-          assert "dur=cap?470:290" in re.search(r'^function animateMove.*$', s, re.M).group(0)
+          legal = s[s.index('function legal('):s.index('function applySim(')]
+          setpos = s[s.index('function setPos('):s.index('function rebuildPieces(')]
+          anim = s[s.index('function animateMove('):s.index('function commitMove(')]
+          assert 'return caps' not in legal
+          assert 'translate3d' in setpos
+          assert 'dur=cap?470:290' in anim
           PY
       - name: Validate JavaScript syntax
         shell: bash
