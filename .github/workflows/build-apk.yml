@@ -16,6 +16,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Fix capture animation path
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/assets/game.html')
+          s=p.read_text()
+          old="if(!js.length)return caps.length?[{from:path[0],to:{r:r,c:c},path:path.slice(1).concat([{r:r,c:c}]),caps:caps}]:[];"
+          new="if(!js.length)return caps.length?[{from:path[0],to:{r:r,c:c},path:path.slice(1),caps:caps}]:[];"
+          if old not in s:
+              raise SystemExit('capture path pattern not found')
+          p.write_text(s.replace(old,new))
+          PY
       - name: Build release APK
         run: gradle :app:assembleRelease --stacktrace
       - name: Upload unsigned APK
