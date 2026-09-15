@@ -16,23 +16,69 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Fix capture animation path
+      - name: Apply DamaCub 4.1 gameplay patch
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('app/src/main/assets/game.html')
-          s=p.read_text()
-          old="if(!js.length)return caps.length?[{from:path[0],to:{r:r,c:c},path:path.slice(1).concat([{r:r,c:c}]),caps:caps}]:[];"
-          new="if(!js.length)return caps.length?[{from:path[0],to:{r:r,c:c},path:path.slice(1),caps:caps}]:[];"
-          if old not in s:
-              raise SystemExit('capture path pattern not found')
-          p.write_text(s.replace(old,new))
+          import re
+
+          p = Path('app/src/main/assets/game.html')
+          s = p.read_text()
+
+          css = r'''
+          /* DamaCub 4.1: GPU-composited piece motion; board stays static during CPU turns. */
+          .board{contain:layout paint;transform:translateZ(0);backface-visibility:hidden}
+          .cells,.pieces{transform:translateZ(0);backface-visibility:hidden}
+          .piece-slot{left:0!important;top:0!important;transition:transform .30s cubic-bezier(.22,.74,.22,1),opacity .14s ease;will-change:transform,opacity;transform-origin:center center;backface-visibility:hidden}
+          .disc{transition:transform .16s ease,opacity .14s ease,filter .16s ease;backface-visibility:hidden}
+          .piece-slot.jumping{z-index:60;transition-duration:.46s}
+          .piece-slot.jumping .disc{transform:translateY(-16%) scale(1.15);filter:drop-shadow(0 13px 7px rgba(0,0,0,.40))}
+          .piece-slot.under-jump .disc{transform:scale(.91);filter:brightness(.78)}
+          .piece-slot.captured .disc{transform:scale(.18) rotate(16deg)}
+          '''
+          if 'DamaCub 4.1: GPU-composited' not in s:
+              s = s.replace('</style>', css + '\n</style>', 1)
+
+          def line_replace(name, replacement):
+              global s
+              pattern = r'^function ' + re.escape(name) + r'\([^\n]*$'
+              s, n = re.subn(pattern, replacement, s, count=1, flags=re.M)
+              if n != 1:
+                  raise SystemExit(f'Nao foi possivel substituir {name}')
+
+          line_replace('legal', "function legal(b,s){var moves=[],r,c,p,ds,js,i,j,rr,cc;for(r=0;r<8;r++)for(c=0;c<8;c++){p=b[r][c];if(side(p)!==s)continue;js=jumpsFrom(b,r,c,p);for(i=0;i<js.length;i++){j=js[i];moves.push({from:{r:r,c:c},to:{r:j.r,c:j.c},path:[{r:j.r,c:j.c}],caps:[j.cap]})}ds=moveDirs(p);for(i=0;i<ds.length;i++){rr=r+ds[i][0];cc=c+ds[i][1];if(inside(rr,cc)&&b[rr][cc]===E)moves.push({from:{r:r,c:c},to:{r:rr,c:cc},path:[{r:rr,c:cc}],caps:[]})}}return moves}")
+          line_replace('setPos', "function setPos(node,r,c){node.style.transform='translate3d('+(c*100)+'%,'+(r*100)+'%,0)'}")
+          line_replace('selectPiece', "function selectPiece(r,c,lm){var list=lm.filter(function(m){return m.from.r===r&&m.from.c===c});if(!list.length){toast('Sem jogada para esta peça');playError();return}selected={r:r,c:c};targets=list;playSelect();markLegal()}")
+          line_replace('animateMove', "function animateMove(m,done){var p=board[m.from.r][m.from.c],node=pieceMap[key(m.from.r,m.from.c)],i=0,curR=m.from.r,curC=m.from.c;if(!node){done();return}delete pieceMap[key(curR,curC)];node.classList.remove('selected-piece');clearMarks();function next(){if(i>=m.path.length){var end=m.path[m.path.length-1];pieceMap[key(end.r,end.c)]=node;promoteNode(node,p,end);done();return}var dest=m.path[i],cap=m.caps[i],victim=cap?pieceMap[key(cap[0],cap[1])]:null,dur=cap?470:290;if(cap){node.classList.add('jumping');if(victim){setTimeout(function(){if(victim&&victim.parentNode)victim.classList.add('under-jump')},Math.round(dur*.42))}}setPos(node,dest.r,dest.c);setTimeout(function(){node.classList.remove('jumping');if(cap&&victim){victim.classList.remove('under-jump');playCapture();victim.classList.add('captured');delete pieceMap[key(cap[0],cap[1])];setTimeout(function(){if(victim.parentNode)victim.parentNode.removeChild(victim)},150)}else playMove();curR=dest.r;curC=dest.c;i++;setTimeout(next,cap?170:45)},dur)}next()}")
+
+          p.write_text(s)
+
+          g = Path('app/build.gradle')
+          gs = g.read_text().replace('versionCode 4', 'versionCode 5').replace("versionName '4.0'", "versionName '4.1'")
+          g.write_text(gs)
+
+          # Static sanity checks: optional captures + transform-only movement.
+          assert "return caps" not in re.search(r'^function legal.*$', s, re.M).group(0)
+          assert "translate3d" in re.search(r'^function setPos.*$', s, re.M).group(0)
+          assert "dur=cap?470:290" in re.search(r'^function animateMove.*$', s, re.M).group(0)
           PY
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('app/src/main/assets/game.html','utf8');
+          const m=s.match(/<script>([\s\S]*?)<\/script>/);
+          if(!m) throw new Error('script nao encontrado');
+          new Function(m[1]);
+          console.log('JavaScript OK');
+          NODE
       - name: Build release APK
         run: gradle :app:assembleRelease --stacktrace
       - name: Upload unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: DamaCub-release-unsigned
+          name: DamaCub-4.1-release-unsigned
           path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
