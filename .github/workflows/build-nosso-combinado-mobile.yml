@@ -1,0 +1,43 @@
+name: Compilar Nosso Combinado Android
+on:
+  push:
+    branches: [nosso-combinado-mobile-375]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Prepare APK
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/Nosso-Combinado-Mobile-3.7.5.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nosso-Combinado-Android-3.7.5
+          path: dist/Nosso-Combinado-Mobile-3.7.5.apk
+          if-no-files-found: error
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "nc-mobile-3.7.5" dist/Nosso-Combinado-Mobile-3.7.5.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Nosso Combinado Mobile 3.7.5" \
+            --notes "APK híbrido com Comparador de preços, Financeiro e Planejamento mensal. Usa o site da Hostinger. Os alarmes nativos em segundo plano do APK original não foram migrados." --prerelease
